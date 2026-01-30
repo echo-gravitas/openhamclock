@@ -1245,20 +1245,21 @@
 
         const map = L.map(mapRef.current, {
           center: [20, 0],
-          zoom: 2,
-          minZoom: 2,
+          zoom: 2.5,
+          minZoom: 2.3,
           maxZoom: 18,
-          worldCopyJump: false,
+          worldCopyJump: true,
           zoomControl: true,
-          maxBounds: [[-85, -180], [85, 180]],
-          maxBoundsViscosity: 1.0
+          maxBounds: [[-90, -Infinity], [90, Infinity]],
+          maxBoundsViscosity: 0.8
         });
 
-        // Initial tile layer
+        // Initial tile layer with bounds to prevent edge requests
         tileLayerRef.current = L.tileLayer(MAP_STYLES[mapStyle].url, {
           attribution: MAP_STYLES[mapStyle].attribution,
-          noWrap: true,
-          crossOrigin: 'anonymous'
+          noWrap: false,
+          crossOrigin: 'anonymous',
+          bounds: [[-85, -180], [85, 180]]
         }).addTo(map);
 
         // Day/night terminator with resolution option for smoother rendering
@@ -1307,8 +1308,9 @@
         mapInstanceRef.current.removeLayer(tileLayerRef.current);
         tileLayerRef.current = L.tileLayer(MAP_STYLES[mapStyle].url, {
           attribution: MAP_STYLES[mapStyle].attribution,
-          noWrap: true,
-          crossOrigin: 'anonymous'
+          noWrap: false,
+          crossOrigin: 'anonymous',
+          bounds: [[-85, -180], [85, 180]]
         }).addTo(mapInstanceRef.current);
         
         // Ensure terminator is on top
