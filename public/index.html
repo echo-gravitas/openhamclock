@@ -1102,10 +1102,10 @@
       const bands = ['80m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
 
       return (
-        <div className="panel" style={{ cursor: 'pointer' }} onClick={() => setViewMode(v => v === 'bars' ? 'chart' : 'bars')}>
-          <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div className="panel" style={{ cursor: 'pointer', padding: '6px' }} onClick={() => setViewMode(v => v === 'bars' ? 'chart' : 'bars')}>
+          <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', fontSize: '11px' }}>
             <span>📡 VOACAP DE-DX</span>
-            <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+            <span style={{ fontSize: '9px', color: 'var(--text-muted)' }}>
               {viewMode === 'bars' ? '▦ bars' : '▤ chart'} • click to toggle
             </span>
           </div>
@@ -1194,16 +1194,16 @@
             </div>
           ) : (
             /* Bar Chart View */
-            <div style={{ fontSize: '13px' }}>
+            <div style={{ fontSize: '11px' }}>
               {/* Solar quick stats */}
               <div style={{ 
                 display: 'flex', 
                 justifyContent: 'space-around',
-                padding: '4px',
-                marginBottom: '4px',
+                padding: '2px',
+                marginBottom: '3px',
                 background: 'var(--bg-tertiary)',
-                borderRadius: '4px',
-                fontSize: '12px'
+                borderRadius: '3px',
+                fontSize: '10px'
               }}>
                 <span><span style={{ color: 'var(--text-muted)' }}>SFI </span><span style={{ color: 'var(--accent-amber)' }}>{solarData.sfi}</span></span>
                 <span><span style={{ color: 'var(--text-muted)' }}>SSN </span><span style={{ color: 'var(--accent-cyan)' }}>{solarData.ssn}</span></span>
@@ -1213,19 +1213,19 @@
               {currentBands.slice(0, 8).map((band, idx) => (
                 <div key={band.band} style={{ 
                   display: 'grid', 
-                  gridTemplateColumns: '32px 1fr 40px', 
-                  gap: '4px',
-                  padding: '2px 0',
+                  gridTemplateColumns: '28px 1fr 32px', 
+                  gap: '3px',
+                  padding: '1px 0',
                   alignItems: 'center'
                 }}>
                   <span style={{ 
                     fontFamily: 'JetBrains Mono, monospace',
-                    fontSize: '12px',
+                    fontSize: '10px',
                     color: band.reliability >= 50 ? 'var(--accent-green)' : 'var(--text-muted)'
                   }}>
                     {band.band}
                   </span>
-                  <div style={{ position: 'relative', height: '10px', background: 'var(--bg-tertiary)', borderRadius: '2px' }}>
+                  <div style={{ position: 'relative', height: '8px', background: 'var(--bg-tertiary)', borderRadius: '2px' }}>
                     <div style={{
                       position: 'absolute',
                       top: 0,
@@ -1238,7 +1238,7 @@
                   </div>
                   <span style={{ 
                     textAlign: 'right',
-                    fontSize: '13px',
+                    fontSize: '10px',
                     color: getStatusColor(band.status)
                   }}>
                     {band.reliability}%
@@ -1271,14 +1271,14 @@
       const imageUrl = `https://sdo.gsfc.nasa.gov/assets/img/latest/latest_256_${imageType}.jpg?t=${timestamp}`;
       
       return (
-        <div className="panel" style={{ padding: '8px' }}>
+        <div className="panel" style={{ padding: '6px' }}>
           <div style={{ 
             display: 'flex', 
             justifyContent: 'space-between', 
             alignItems: 'center',
-            marginBottom: '6px'
+            marginBottom: '4px'
           }}>
-            <span style={{ fontSize: '12px', color: 'var(--accent-amber)', fontWeight: '700' }}>☀ SOLAR</span>
+            <span style={{ fontSize: '11px', color: 'var(--accent-amber)', fontWeight: '700' }}>☀ SOLAR</span>
             <select 
               value={imageType}
               onChange={(e) => setImageType(e.target.value)}
@@ -1287,8 +1287,8 @@
                 background: 'var(--bg-tertiary)',
                 border: '1px solid var(--border-color)',
                 color: 'var(--text-secondary)',
-                fontSize: '13px',
-                padding: '2px 4px',
+                fontSize: '10px',
+                padding: '1px 3px',
                 borderRadius: '3px',
                 cursor: 'pointer'
               }}
@@ -1300,8 +1300,9 @@
           </div>
           <div style={{ 
             position: 'relative',
-            width: '100%',
-            paddingBottom: '100%', // Square aspect ratio
+            width: '65%',
+            paddingBottom: '65%', // Smaller square
+            margin: '0 auto',
             background: '#000',
             borderRadius: '50%',
             overflow: 'hidden'
@@ -1325,11 +1326,11 @@
           </div>
           <div style={{ 
             textAlign: 'center', 
-            marginTop: '4px', 
-            fontSize: '12px', 
+            marginTop: '2px', 
+            fontSize: '9px', 
             color: 'var(--text-muted)' 
           }}>
-            SDO/AIA • Live from NASA
+            SDO/AIA • NASA
           </div>
         </div>
       );
@@ -2703,8 +2704,8 @@
       
       useEffect(() => {
         const calculateScale = () => {
-          const minHeight = 900; // Design height
-          const minWidth = 1400; // Design width
+          const minHeight = 750; // Design height (reduced for compact layout)
+          const minWidth = 1200; // Design width
           const vh = window.innerHeight;
           const vw = window.innerWidth;
           
@@ -2712,7 +2713,7 @@
           const scaleW = vw / minWidth;
           const newScale = Math.min(scaleH, scaleW, 1); // Never scale above 1
           
-          setScale(Math.max(newScale, 0.5)); // Minimum 50% scale
+          setScale(Math.max(newScale, 0.6)); // Minimum 60% scale
         };
         
         calculateScale();
@@ -2736,10 +2737,10 @@
             transform: `scale(${scale})`,
             transformOrigin: 'center center',
             display: 'grid',
-            gridTemplateColumns: '280px 1fr 280px',
-            gridTemplateRows: '50px 1fr',
-            gap: '8px',
-            padding: '8px',
+            gridTemplateColumns: '220px 1fr 240px',
+            gridTemplateRows: '46px 1fr',
+            gap: '6px',
+            padding: '6px',
             overflow: 'hidden',
             boxSizing: 'border-box'
           }}>
@@ -2798,14 +2799,14 @@
           </div>
           
           {/* LEFT SIDEBAR */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', overflow: 'hidden' }}>
             {/* DE Location */}
-            <div className="panel" style={{ padding: '12px', flex: '0 0 auto' }}>
-              <div style={{ fontSize: '13px', color: 'var(--accent-cyan)', fontWeight: '700', marginBottom: '8px' }}>📍 DE - YOUR LOCATION</div>
-              <div style={{ fontFamily: 'JetBrains Mono', fontSize: '13px' }}>
-                <div style={{ color: 'var(--accent-amber)', fontSize: '18px', fontWeight: '700' }}>{deGrid}</div>
-                <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginTop: '2px' }}>{config.location.lat.toFixed(2)}°, {config.location.lon.toFixed(2)}°</div>
-                <div style={{ marginTop: '6px', fontSize: '12px' }}>
+            <div className="panel" style={{ padding: '8px', flex: '0 0 auto' }}>
+              <div style={{ fontSize: '11px', color: 'var(--accent-cyan)', fontWeight: '700', marginBottom: '4px' }}>📍 DE - YOUR LOCATION</div>
+              <div style={{ fontFamily: 'JetBrains Mono', fontSize: '11px' }}>
+                <div style={{ color: 'var(--accent-amber)', fontSize: '15px', fontWeight: '700' }}>{deGrid}</div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '10px', marginTop: '1px' }}>{config.location.lat.toFixed(2)}°, {config.location.lon.toFixed(2)}°</div>
+                <div style={{ marginTop: '3px', fontSize: '10px' }}>
                   <span style={{ color: 'var(--text-secondary)' }}>☀ </span>
                   <span style={{ color: 'var(--accent-amber)' }}>{deSunTimes.sunrise}</span>
                   <span style={{ color: 'var(--text-secondary)' }}> → </span>
@@ -2815,12 +2816,12 @@
             </div>
             
             {/* DX Location */}
-            <div className="panel" style={{ padding: '12px', flex: '0 0 auto' }}>
-              <div style={{ fontSize: '13px', color: 'var(--accent-green)', fontWeight: '700', marginBottom: '8px' }}>🎯 DX - TARGET</div>
-              <div style={{ fontFamily: 'JetBrains Mono', fontSize: '13px' }}>
-                <div style={{ color: 'var(--accent-amber)', fontSize: '18px', fontWeight: '700' }}>{dxGrid}</div>
-                <div style={{ color: 'var(--text-secondary)', fontSize: '12px', marginTop: '2px' }}>{dxLocation.lat.toFixed(2)}°, {dxLocation.lon.toFixed(2)}°</div>
-                <div style={{ marginTop: '6px', fontSize: '12px' }}>
+            <div className="panel" style={{ padding: '8px', flex: '0 0 auto' }}>
+              <div style={{ fontSize: '11px', color: 'var(--accent-green)', fontWeight: '700', marginBottom: '4px' }}>🎯 DX - TARGET</div>
+              <div style={{ fontFamily: 'JetBrains Mono', fontSize: '11px' }}>
+                <div style={{ color: 'var(--accent-amber)', fontSize: '15px', fontWeight: '700' }}>{dxGrid}</div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: '10px', marginTop: '1px' }}>{dxLocation.lat.toFixed(2)}°, {dxLocation.lon.toFixed(2)}°</div>
+                <div style={{ marginTop: '3px', fontSize: '10px' }}>
                   <span style={{ color: 'var(--text-secondary)' }}>☀ </span>
                   <span style={{ color: 'var(--accent-amber)' }}>{dxSunTimes.sunrise}</span>
                   <span style={{ color: 'var(--text-secondary)' }}> → </span>
@@ -2830,9 +2831,9 @@
             </div>
             
             {/* Band Conditions - Compact with color coding */}
-            <div className="panel" style={{ padding: '10px', flex: '0 0 auto', overflow: 'hidden' }}>
-              <div style={{ fontSize: '12px', color: 'var(--accent-purple)', fontWeight: '700', marginBottom: '6px' }}>📊 BAND CONDITIONS</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '3px', fontSize: '13px', fontFamily: 'JetBrains Mono' }}>
+            <div className="panel" style={{ padding: '6px', flex: '0 0 auto', overflow: 'hidden' }}>
+              <div style={{ fontSize: '10px', color: 'var(--accent-purple)', fontWeight: '700', marginBottom: '4px' }}>📊 BAND CONDITIONS</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '2px', fontSize: '11px', fontFamily: 'JetBrains Mono' }}>
                 {bandConditions.data.slice(0, 12).map(band => {
                   const colors = {
                     GOOD: { bg: 'rgba(0,255,136,0.2)', color: '#00ff88', border: 'rgba(0,255,136,0.4)' },
@@ -2843,12 +2844,12 @@
                   return (
                     <div key={band.band} style={{ 
                       textAlign: 'center', 
-                      padding: '3px 1px',
+                      padding: '2px 1px',
                       background: style.bg,
                       border: `1px solid ${style.border}`,
                       borderRadius: '2px'
                     }}>
-                      <div style={{ fontWeight: '600', color: style.color, fontSize: '12px' }}>{band.band}</div>
+                      <div style={{ fontWeight: '600', color: style.color, fontSize: '10px' }}>{band.band}</div>
                     </div>
                   );
                 })}
