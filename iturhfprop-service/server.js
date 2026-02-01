@@ -128,45 +128,73 @@ function parseOutputFile(outputPath) {
     
     const results = {
       frequencies: [],
-      raw: output
+      raw: output.substring(0, 3000)  // Include raw for debugging
     };
     
+    let headers = [];
     let inDataSection = false;
     
     for (const line of lines) {
-      // Look for frequency results
-      // Format varies but typically: Freq, MUF, E-layer MUF, reliability, SNR, etc.
-      if (line.includes('Freq') && line.includes('MUF')) {
-        inDataSection = true;
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('-') || trimmed.startsWith('*')) {
         continue;
       }
       
-      if (inDataSection && line.trim()) {
-        const parts = line.trim().split(/\s+/);
-        if (parts.length >= 4 && !isNaN(parseFloat(parts[0]))) {
-          results.frequencies.push({
-            freq: parseFloat(parts[0]),
-            muf: parseFloat(parts[1]) || null,
-            reliability: parseFloat(parts[2]) || 0,
-            snr: parseFloat(parts[3]) || null,
-            sdbw: parseFloat(parts[4]) || null
-          });
+      // Look for CSV header line
+      if (trimmed.includes('Freq') || trimmed.includes('FREQ') || trimmed.includes('frequency')) {
+        headers = trimmed.split(/[,\t]+/).map(h => h.trim().toLowerCase());
+        inDataSection = true;
+        console.log('[Parse] Found headers:', headers);
+        continue;
+      }
+      
+      // Parse data lines (CSV or space-separated)
+      if (inDataSection) {
+        let parts;
+        if (trimmed.includes(',')) {
+          parts = trimmed.split(',').map(p => p.trim());
+        } else {
+          parts = trimmed.split(/\s+/);
+        }
+        
+        if (parts.length >= 2 && !isNaN(parseFloat(parts[0]))) {
+          const freqResult = {
+            freq: parseFloat(parts[0])
+          };
+          
+          // Map based on headers or position
+          if (headers.length > 0) {
+            headers.forEach((h, i) => {
+              if (i < parts.length) {
+                const val = parseFloat(parts[i]);
+                if (!isNaN(val)) {
+                  if (h.includes('snr')) freqResult.snr = val;
+                  else if (h.includes('bcr') || h.includes('rel')) freqResult.reliability = val;
+                  else if (h.includes('pr') || h.includes('power')) freqResult.sdbw = val;
+                  else if (h.includes('muf')) freqResult.muf = val;
+                }
+              }
+            });
+          } else {
+            // Fallback positional parsing
+            if (parts.length >= 2) freqResult.reliability = parseFloat(parts[1]) || 0;
+            if (parts.length >= 3) freqResult.snr = parseFloat(parts[2]) || null;
+            if (parts.length >= 4) freqResult.sdbw = parseFloat(parts[3]) || null;
+          }
+          
+          console.log('[Parse] Frequency result:', freqResult);
+          results.frequencies.push(freqResult);
         }
       }
     }
     
-    // Extract MUF from output
-    const mufMatch = output.match(/MUF\s*[=:]\s*([\d.]+)/i);
+    // Also look for MUF in header section
+    const mufMatch = output.match(/(?:BMUF|MUF|Operational MUF)\s*[:=]?\s*([\d.]+)/i);
     if (mufMatch) {
       results.muf = parseFloat(mufMatch[1]);
     }
     
-    // Extract E-layer MUF
-    const emufMatch = output.match(/E[-\s]*MUF\s*[=:]\s*([\d.]+)/i);
-    if (emufMatch) {
-      results.eMuf = parseFloat(emufMatch[1]);
-    }
-    
+    console.log(`[Parse] Found ${results.frequencies.length} frequency results`);
     return results;
   } catch (err) {
     console.error('[Parse Error]', err.message);
@@ -234,6 +262,12 @@ async function runPrediction(params) {
     
     const elapsed = Date.now() - startTime;
     console.log(`[ITURHFProp] Completed in ${elapsed}ms`);
+    
+    // Log raw output for debugging
+    if (fs.existsSync(outputPath)) {
+      const rawOutput = fs.readFileSync(outputPath, 'utf8');
+      console.log(`[ITURHFProp] Raw output (first 2000 chars):\n${rawOutput.substring(0, 2000)}`);
+    }
     
     // Parse output
     const results = parseOutputFile(outputPath);
@@ -612,6 +646,11 @@ app.get('/api/bands', async (req, res) => {
       model: 'ITU-R P.533-14',
       muf: results.muf,
       bands,
+      debug: {
+        rawOutput: results.raw,
+        freqCount: results.frequencies.length,
+        parsedFreqs: results.frequencies
+      },
       timestamp: new Date().toISOString()
     });
     
