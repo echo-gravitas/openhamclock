@@ -25,14 +25,23 @@ RUN curl -L -o ITURHFProp "https://github.com/ITU-R-Study-Group-3/ITU-R-HF/relea
 # Download source to get Data files
 RUN curl -L -o source.tar.gz "https://github.com/ITU-R-Study-Group-3/ITU-R-HF/archive/refs/tags/v14.3.tar.gz" \
     && tar -xzf source.tar.gz \
-    && ls -la ITU-R-HF-14.3/ \
-    && find ITU-R-HF-14.3 -type d -name "Data" \
-    && find ITU-R-HF-14.3 -type d -name "IonMap"
+    && echo "=== Top level ===" && ls -la ITU-R-HF-14.3/ \
+    && echo "=== Finding Data ===" && find ITU-R-HF-14.3 -type d -name "Data" \
+    && echo "=== Finding IonMap ===" && find ITU-R-HF-14.3 -type d -name "IonMap"
 
-# Move Data directories from wherever they are in the source tree
-RUN cp -r ITU-R-HF-14.3/P533/Data . || cp -r ITU-R-HF-14.3/Data . || echo "Data not found at expected locations" \
-    && cp -r ITU-R-HF-14.3/P533/IonMap . || cp -r ITU-R-HF-14.3/IonMap . || echo "IonMap not found at expected locations" \
-    && rm -rf ITU-R-HF-14.3 source.tar.gz
+# Move Data directories - try multiple possible locations
+RUN if [ -d "ITU-R-HF-14.3/P533/Data" ]; then cp -r ITU-R-HF-14.3/P533/Data .; \
+    elif [ -d "ITU-R-HF-14.3/Data" ]; then cp -r ITU-R-HF-14.3/Data .; \
+    else echo "ERROR: Data not found!" && exit 1; fi
+
+# IonMap might be inside P533 or at root level  
+RUN if [ -d "ITU-R-HF-14.3/P533/IonMap" ]; then cp -r ITU-R-HF-14.3/P533/IonMap .; \
+    elif [ -d "ITU-R-HF-14.3/IonMap" ]; then cp -r ITU-R-HF-14.3/IonMap .; \
+    elif [ -d "ITU-R-HF-14.3/P533/Src/IonMap" ]; then cp -r ITU-R-HF-14.3/P533/Src/IonMap .; \
+    else echo "WARNING: IonMap not found, checking if embedded in Data..." && ls -la Data/; fi
+
+# Cleanup
+RUN rm -rf ITU-R-HF-14.3 source.tar.gz
 
 # Set library path so ITURHFProp can find shared libs
 ENV LD_LIBRARY_PATH=/opt/iturhfprop:$LD_LIBRARY_PATH
