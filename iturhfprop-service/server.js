@@ -38,8 +38,8 @@ let consecutiveFailures = 0;
 let lastFailureTime = 0;
 let lastLogTime = 0;
 const FAILURE_THRESHOLD = 3;  // Open after 3 failures
-const CIRCUIT_RESET_TIME = 2 * 60 * 1000; // 2 minutes before retry
-const LOG_INTERVAL = 30000; // Only log every 30 seconds
+const CIRCUIT_RESET_TIME = 5 * 60 * 1000; // 5 minutes before retry
+const LOG_INTERVAL = 60000; // Only log every 60 seconds
 
 function getCacheKey(params) {
   // Round coordinates to 1 decimal place for better cache hits

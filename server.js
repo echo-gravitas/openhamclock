@@ -41,6 +41,26 @@ if (ITURHFPROP_URL) {
 app.use(cors());
 app.use(express.json());
 
+// ============================================
+// RATE-LIMITED LOGGING
+// ============================================
+// Prevents log spam when services are down
+const errorLogState = {};
+const ERROR_LOG_INTERVAL = 60000; // Only log same error once per minute
+
+function logErrorOnce(category, message) {
+  const key = `${category}:${message}`;
+  const now = Date.now();
+  const lastLogged = errorLogState[key] || 0;
+  
+  if (now - lastLogged >= ERROR_LOG_INTERVAL) {
+    errorLogState[key] = now;
+    console.error(`[${category}] ${message}`);
+    return true;
+  }
+  return false;
+}
+
 // Serve static files - use 'dist' in production (Vite build), 'public' in development
 const staticDir = process.env.NODE_ENV === 'production' 
   ? path.join(__dirname, 'dist')
@@ -526,7 +546,7 @@ app.get('/api/dxcluster/spots', async (req, res) => {
     } catch (error) {
       clearTimeout(timeout);
       if (error.name !== 'AbortError') {
-        console.error('[DX Cluster] HamQTH error:', error.message);
+        logErrorOnce('DX Cluster', `HamQTH: ${error.message}`);
       }
     }
     return null;
@@ -554,7 +574,7 @@ app.get('/api/dxcluster/spots', async (req, res) => {
     } catch (error) {
       clearTimeout(timeout);
       if (error.name !== 'AbortError') {
-        console.error('[DX Cluster] DX Spider Proxy error:', error.message);
+        logErrorOnce('DX Cluster', `Proxy: ${error.message}`);
       }
     }
     return null;
@@ -679,9 +699,9 @@ app.get('/api/dxcluster/spots', async (req, res) => {
       });
       
       client.on('error', (err) => {
-        // Only log unexpected errors, not connection resets (they're common)
-        if (!err.message.includes('ECONNRESET') && !err.message.includes('ETIMEDOUT') && !err.message.includes('ENOTFOUND')) {
-          console.error(`[DX Cluster] DX Spider ${node.host} error:`, err.message);
+        // Only log unexpected errors, not connection issues (they're common)
+        if (!err.message.includes('ECONNRESET') && !err.message.includes('ETIMEDOUT') && !err.message.includes('ENOTFOUND') && !err.message.includes('ECONNREFUSED')) {
+          logErrorOnce('DX Cluster', `DX Spider ${node.host}: ${err.message}`);
         }
         cleanup();
       });
@@ -1542,7 +1562,7 @@ app.get('/api/myspots/:callsign', async (req, res) => {
     
     res.json(spotsWithLocations);
   } catch (error) {
-    console.error('[My Spots] Error:', error.message);
+    logErrorOnce('My Spots', error.message);
     res.json([]);
   }
 });
@@ -1770,7 +1790,7 @@ async function fetchIonosondeData() {
     return validStations;
     
   } catch (error) {
-    console.error('[Ionosonde] Fetch error:', error.message);
+    logErrorOnce('Ionosonde', `Fetch error: ${error.message}`);
     return ionosondeCache.data || [];
   }
 }
@@ -1785,7 +1805,7 @@ app.get('/api/ionosonde', async (req, res) => {
       stations: stations
     });
   } catch (error) {
-    console.error('[Ionosonde] API error:', error.message);
+    logErrorOnce('Ionosonde', `API: ${error.message}`);
     res.status(500).json({ error: 'Failed to fetch ionosonde data' });
   }
 });
@@ -1923,12 +1943,12 @@ async function fetchITURHFPropPrediction(txLat, txLon, rxLat, rxLon, ssn, month,
     clearTimeout(timeoutId);
     
     if (!response.ok) {
-      console.log('[Hybrid] ITURHFProp returned error:', response.status, response.statusText);
+      logErrorOnce('Hybrid', `ITURHFProp returned ${response.status}`);
       return null;
     }
     
     const data = await response.json();
-    console.log('[Hybrid] ITURHFProp prediction received, MUF:', data.muf);
+    // Only log success occasionally to reduce noise
     
     // Cache the result
     iturhfpropCache = {
@@ -1940,7 +1960,9 @@ async function fetchITURHFPropPrediction(txLat, txLon, rxLat, rxLon, ssn, month,
     
     return data;
   } catch (err) {
-    console.log('[Hybrid] ITURHFProp service error:', err.name, err.message);
+    if (err.name !== 'AbortError') {
+      logErrorOnce('Hybrid', `ITURHFProp: ${err.message}`);
+    }
     return null;
   }
 }
@@ -1952,17 +1974,17 @@ async function fetchITURHFPropHourly(txLat, txLon, rxLat, rxLon, ssn, month) {
   if (!ITURHFPROP_URL) return null;
   
   try {
-    console.log('[Hybrid] Fetching 24-hour prediction from ITURHFProp...');
     const url = `${ITURHFPROP_URL}/api/predict/hourly?txLat=${txLat}&txLon=${txLon}&rxLat=${rxLat}&rxLon=${rxLon}&ssn=${ssn}&month=${month}`;
     
     const response = await fetch(url, { timeout: 60000 }); // 60s timeout for 24-hour calc
     if (!response.ok) return null;
     
     const data = await response.json();
-    console.log('[Hybrid] Received 24-hour prediction');
     return data;
   } catch (err) {
-    console.log('[Hybrid] ITURHFProp hourly unavailable:', err.message);
+    if (err.name !== 'AbortError') {
+      logErrorOnce('Hybrid', `ITURHFProp hourly: ${err.message}`);
+    }
     return null;
   }
 }
