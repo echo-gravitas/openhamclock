@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 
 /**
- * WSPR Propagation Heatmap Plugin v1.4.1
+ * WSPR Propagation Heatmap Plugin v1.4.2
  * 
  * Advanced Features:
  * - Great circle curved path lines between transmitters and receivers
@@ -17,6 +17,8 @@ import { useState, useEffect, useRef } from 'react';
  * - Draggable control panels with CTRL+drag (v1.4.0)
  * - Persistent panel positions (v1.4.1)
  * - Proper cleanup on disable (v1.4.1)
+ * - Fixed duplicate control creation (v1.4.2)
+ * - Performance optimizations (v1.4.2)
  * - Statistics display (total stations, spots)
  * - Signal strength legend
  * 
@@ -32,7 +34,7 @@ export const metadata = {
   category: 'propagation',
   defaultEnabled: false,
   defaultOpacity: 0.7,
-  version: '1.4.1'
+  version: '1.4.2'
 };
 
 // Convert grid square to lat/lon
@@ -262,7 +264,12 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
   const [showAnimation, setShowAnimation] = useState(true);
   const [showHeatmap, setShowHeatmap] = useState(false);
   
-  // UI Controls
+  // UI Controls (refs to avoid recreation)
+  const legendControlRef = useRef(null);
+  const statsControlRef = useRef(null);
+  const filterControlRef = useRef(null);
+  const chartControlRef = useRef(null);
+  
   const [legendControl, setLegendControl] = useState(null);
   const [statsControl, setStatsControl] = useState(null);
   const [filterControl, setFilterControl] = useState(null);
@@ -293,9 +300,10 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
     return () => clearInterval(interval);
   }, [enabled, bandFilter, timeWindow]);
 
-  // Create filter control panel (v1.2.0)
+  // Create UI controls once (v1.2.0+)
   useEffect(() => {
-    if (!enabled || !map || filterControl) return;
+    if (!enabled || !map) return;
+    if (filterControlRef.current || statsControlRef.current || legendControlRef.current || chartControlRef.current) return;
 
     const FilterControl = L.Control.extend({
       options: { position: 'topright' },
@@ -375,6 +383,7 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
     
     const control = new FilterControl();
     map.addControl(control);
+    filterControlRef.current = control;
     setFilterControl(control);
     
     // Make control draggable after it's added to DOM
@@ -409,7 +418,117 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
       });
     }, 100);
     
-  }, [enabled, map, filterControl]);
+    // Create stats control
+    const StatsControl = L.Control.extend({
+      options: { position: 'topleft' },
+      onAdd: function() {
+        const div = L.DomUtil.create('div', 'wspr-stats');
+        div.style.cssText = `
+          background: rgba(0, 0, 0, 0.9);
+          padding: 12px;
+          border-radius: 5px;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 11px;
+          color: white;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        `;
+        div.innerHTML = `
+          <div style="font-weight: bold; margin-bottom: 6px; font-size: 13px;">📊 WSPR Activity</div>
+          <div style="margin-bottom: 8px; padding: 6px; background: rgba(255,255,255,0.1); border-radius: 3px;">
+            <div style="font-size: 10px; opacity: 0.8; margin-bottom: 2px;">Propagation Score</div>
+            <div style="font-size: 18px; font-weight: bold; color: #888;">--/100</div>
+          </div>
+          <div>Paths: <span style="color: #00aaff;">0</span></div>
+          <div>TX Stations: <span style="color: #ff6600;">0</span></div>
+          <div>RX Stations: <span style="color: #0088ff;">0</span></div>
+          <div>Total: <span style="color: #00ff00;">0</span></div>
+          <div style="margin-top: 6px; font-size: 10px; opacity: 0.7;">Initializing...</div>
+        `;
+        return div;
+      }
+    });
+    
+    const stats = new StatsControl();
+    map.addControl(stats);
+    statsControlRef.current = stats;
+    setStatsControl(stats);
+    
+    setTimeout(() => {
+      const container = document.querySelector('.wspr-stats');
+      if (container) makeDraggable(container, 'wspr-stats-position');
+    }, 150);
+    
+    // Create legend control
+    const LegendControl = L.Control.extend({
+      options: { position: 'bottomright' },
+      onAdd: function() {
+        const div = L.DomUtil.create('div', 'wspr-legend');
+        div.style.cssText = `
+          background: rgba(0, 0, 0, 0.9);
+          padding: 10px;
+          border-radius: 5px;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 11px;
+          color: white;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        `;
+        div.innerHTML = `
+          <div style="font-weight: bold; margin-bottom: 5px; font-size: 12px;">📡 Signal Strength</div>
+          <div><span style="color: #00ff00;">●</span> Excellent (&gt; 5 dB)</div>
+          <div><span style="color: #ffff00;">●</span> Good (0 to 5 dB)</div>
+          <div><span style="color: #ffaa00;">●</span> Moderate (-10 to 0 dB)</div>
+          <div><span style="color: #ff6600;">●</span> Weak (-20 to -10 dB)</div>
+          <div><span style="color: #ff0000;">●</span> Very Weak (&lt; -20 dB)</div>
+          <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #555;">
+            <span style="color: #00ffff;">●</span> Best DX Paths
+          </div>
+        `;
+        return div;
+      }
+    });
+    const legend = new LegendControl();
+    map.addControl(legend);
+    legendControlRef.current = legend;
+    setLegendControl(legend);
+    
+    setTimeout(() => {
+      const container = document.querySelector('.wspr-legend');
+      if (container) makeDraggable(container, 'wspr-legend-position');
+    }, 150);
+    
+    // Create band chart control
+    const ChartControl = L.Control.extend({
+      options: { position: 'bottomleft' },
+      onAdd: function() {
+        const div = L.DomUtil.create('div', 'wspr-chart');
+        div.style.cssText = `
+          background: rgba(0, 0, 0, 0.9);
+          padding: 10px;
+          border-radius: 5px;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 10px;
+          color: white;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+          max-width: 200px;
+        `;
+        div.innerHTML = '<div style="font-weight: bold; margin-bottom: 6px; font-size: 11px;">📊 Band Activity</div><div style="opacity: 0.7;">Loading...</div>';
+        return div;
+      }
+    });
+    
+    const chart = new ChartControl();
+    map.addControl(chart);
+    chartControlRef.current = chart;
+    setChartControl(chart);
+    
+    setTimeout(() => {
+      const container = document.querySelector('.wspr-chart');
+      if (container) makeDraggable(container, 'wspr-chart-position');
+    }, 150);
+    
+    console.log('[WSPR] All controls created once');
+    
+  }, [enabled, map]);
 
   // Render WSPR paths and markers
   useEffect(() => {
@@ -542,32 +661,16 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
     setPathLayers(newPaths);
     setMarkerLayers(newMarkers);
     
-    // Update statistics control - only create once
-    if (statsControl && map) {
-      try {
-        map.removeControl(statsControl);
-      } catch (e) {}
-    }
+    // Update stats content only (don't recreate control)
+    const propScore = calculatePropagationScore(limitedData);
+    const scoreColor = propScore > 70 ? '#00ff00' : propScore > 40 ? '#ffaa00' : '#ff6600';
+    const totalStations = txStations.size + rxStations.size;
     
-    const StatsControl = L.Control.extend({
-      options: { position: 'topleft' },
-      onAdd: function() {
-        const div = L.DomUtil.create('div', 'wspr-stats');
-        div.style.cssText = `
-          background: rgba(0, 0, 0, 0.9);
-          padding: 12px;
-          border-radius: 5px;
-          font-family: 'JetBrains Mono', monospace;
-          font-size: 11px;
-          color: white;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-        `;
-        
-        const propScore = calculatePropagationScore(limitedData);
-        const scoreColor = propScore > 70 ? '#00ff00' : propScore > 40 ? '#ffaa00' : '#ff6600';
-        const totalStations = txStations.size + rxStations.size;
-        
-        div.innerHTML = `
+    // Update existing stats panel content if it exists
+    setTimeout(() => {
+      const statsContainer = document.querySelector('.wspr-stats');
+      if (statsContainer && enabled) {
+        statsContainer.innerHTML = `
           <div style="font-weight: bold; margin-bottom: 6px; font-size: 13px;">📊 WSPR Activity</div>
           <div style="margin-bottom: 8px; padding: 6px; background: rgba(255,255,255,0.1); border-radius: 3px;">
             <div style="font-size: 10px; opacity: 0.8; margin-bottom: 2px;">Propagation Score</div>
@@ -579,126 +682,43 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
           <div>Total: <span style="color: #00ff00;">${totalStations}</span></div>
           <div style="margin-top: 6px; font-size: 10px; opacity: 0.7;">Last ${timeWindow} min</div>
         `;
-        return div;
       }
-    });
+    }, 50);
     
-    // Only add stats control if enabled
-    if (enabled) {
-      const stats = new StatsControl();
-      map.addControl(stats);
-      setStatsControl(stats);
-    }
-    
-    // Make stats draggable - only if enabled
-    if (enabled) {
-      setTimeout(() => {
-        const container = document.querySelector('.wspr-stats');
-        if (container) {
-          makeDraggable(container, 'wspr-stats-position');
-        }
-      }, 150);
-    }
-    
-    // Add legend - only once and only if enabled
-    if (!legendControl && map && enabled) {
-      const LegendControl = L.Control.extend({
-        options: { position: 'bottomright' },
-        onAdd: function() {
-          const div = L.DomUtil.create('div', 'wspr-legend');
-          div.style.cssText = `
-            background: rgba(0, 0, 0, 0.9);
-            padding: 10px;
-            border-radius: 5px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 11px;
-            color: white;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-          `;
-          div.innerHTML = `
-            <div style="font-weight: bold; margin-bottom: 5px; font-size: 12px;">📡 Signal Strength</div>
-            <div><span style="color: #00ff00;">●</span> Excellent (&gt; 5 dB)</div>
-            <div><span style="color: #ffff00;">●</span> Good (0 to 5 dB)</div>
-            <div><span style="color: #ffaa00;">●</span> Moderate (-10 to 0 dB)</div>
-            <div><span style="color: #ff6600;">●</span> Weak (-20 to -10 dB)</div>
-            <div><span style="color: #ff0000;">●</span> Very Weak (&lt; -20 dB)</div>
-            <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid #555;">
-              <span style="color: #00ffff;">●</span> Best DX Paths
-            </div>
-          `;
-          return div;
-        }
-      });
-      const legend = new LegendControl();
-      map.addControl(legend);
-      setLegendControl(legend);
-      
-      // Make legend draggable
-      setTimeout(() => {
-        const container = document.querySelector('.wspr-legend');
-        if (container) makeDraggable(container, 'wspr-legend-position');
-      }, 150);
-    }
-    
-    // Add band activity chart - only once and only if enabled
-    if (!chartControl && map && limitedData.length > 0 && enabled) {
-      const bandCounts = {};
-      limitedData.forEach(spot => {
-        const band = spot.band || 'Unknown';
-        bandCounts[band] = (bandCounts[band] || 0) + 1;
-      });
-      
-      const ChartControl = L.Control.extend({
-        options: { position: 'bottomleft' },
-        onAdd: function() {
-          const div = L.DomUtil.create('div', 'wspr-chart');
-          div.style.cssText = `
-            background: rgba(0, 0, 0, 0.9);
-            padding: 10px;
-            border-radius: 5px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 10px;
-            color: white;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-            max-width: 200px;
-          `;
-          
-          let chartHTML = '<div style="font-weight: bold; margin-bottom: 6px; font-size: 11px;">📊 Band Activity</div>';
-          
-          Object.entries(bandCounts)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 8)
-            .forEach(([band, count]) => {
-              const percentage = (count / limitedData.length) * 100;
-              const barWidth = Math.max(percentage, 5);
-              chartHTML += `
-                <div style="margin-bottom: 4px;">
-                  <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
-                    <span>${band}</span>
-                    <span style="color: #00aaff;">${count}</span>
-                  </div>
-                  <div style="background: #333; height: 6px; border-radius: 3px; overflow: hidden;">
-                    <div style="background: linear-gradient(90deg, #ff6600, #00aaff); height: 100%; width: ${barWidth}%;"></div>
-                  </div>
+    // Update band chart content if it exists
+    setTimeout(() => {
+      const chartContainer = document.querySelector('.wspr-chart');
+      if (chartContainer && limitedData.length > 0 && enabled) {
+        const bandCounts = {};
+        limitedData.forEach(spot => {
+          const band = spot.band || 'Unknown';
+          bandCounts[band] = (bandCounts[band] || 0) + 1;
+        });
+        
+        let chartHTML = '<div style="font-weight: bold; margin-bottom: 6px; font-size: 11px;">📊 Band Activity</div>';
+        
+        Object.entries(bandCounts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 8)
+          .forEach(([band, count]) => {
+            const percentage = (count / limitedData.length) * 100;
+            const barWidth = Math.max(percentage, 5);
+            chartHTML += `
+              <div style="margin-bottom: 4px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
+                  <span>${band}</span>
+                  <span style="color: #00aaff;">${count}</span>
                 </div>
-              `;
-            });
-          
-          div.innerHTML = chartHTML;
-          return div;
-        }
-      });
-      
-      const chart = new ChartControl();
-      map.addControl(chart);
-      setChartControl(chart);
-      
-      // Make chart draggable
-      setTimeout(() => {
-        const container = document.querySelector('.wspr-chart');
-        if (container) makeDraggable(container, 'wspr-chart-position');
-      }, 150);
-    }
+                <div style="background: #333; height: 6px; border-radius: 3px; overflow: hidden;">
+                  <div style="background: linear-gradient(90deg, #ff6600, #00aaff); height: 100%; width: ${barWidth}%;"></div>
+                </div>
+              </div>
+            `;
+          });
+        
+        chartContainer.innerHTML = chartHTML;
+      }
+    }, 50);
     
     console.log(`[WSPR Plugin] Rendered ${newPaths.length} paths, ${newMarkers.length} markers, ${bestPaths.length} best DX`);
 
@@ -710,7 +730,7 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
         try { map.removeLayer(layer); } catch (e) {}
       });
     };
-  }, [enabled, wsprData, map, opacity, snrThreshold, showAnimation, timeWindow, legendControl, statsControl, chartControl]);
+  }, [enabled, wsprData, map, snrThreshold, showAnimation, timeWindow]);
 
   // Render heatmap overlay (v1.4.0)
   useEffect(() => {
@@ -821,46 +841,50 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
       console.log('[WSPR] Plugin disabled - cleaning up all controls and layers');
       
       // Remove filter control
-      if (filterControl) {
+      if (filterControlRef.current) {
         try {
-          map.removeControl(filterControl);
+          map.removeControl(filterControlRef.current);
           console.log('[WSPR] Removed filter control');
         } catch (e) {
           console.error('[WSPR] Error removing filter control:', e);
         }
+        filterControlRef.current = null;
         setFilterControl(null);
       }
       
       // Remove legend control
-      if (legendControl) {
+      if (legendControlRef.current) {
         try {
-          map.removeControl(legendControl);
+          map.removeControl(legendControlRef.current);
           console.log('[WSPR] Removed legend control');
         } catch (e) {
           console.error('[WSPR] Error removing legend control:', e);
         }
+        legendControlRef.current = null;
         setLegendControl(null);
       }
       
       // Remove stats control
-      if (statsControl) {
+      if (statsControlRef.current) {
         try {
-          map.removeControl(statsControl);
+          map.removeControl(statsControlRef.current);
           console.log('[WSPR] Removed stats control');
         } catch (e) {
           console.error('[WSPR] Error removing stats control:', e);
         }
+        statsControlRef.current = null;
         setStatsControl(null);
       }
       
       // Remove chart control
-      if (chartControl) {
+      if (chartControlRef.current) {
         try {
-          map.removeControl(chartControl);
+          map.removeControl(chartControlRef.current);
           console.log('[WSPR] Removed chart control');
         } catch (e) {
           console.error('[WSPR] Error removing chart control:', e);
         }
+        chartControlRef.current = null;
         setChartControl(null);
       }
       
@@ -885,7 +909,7 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
       setPathLayers([]);
       setMarkerLayers([]);
     }
-  }, [enabled, map, filterControl, legendControl, statsControl, chartControl, heatmapLayer, pathLayers, markerLayers]);
+  }, [enabled, map, heatmapLayer, pathLayers, markerLayers]);
 
   // Update opacity
   useEffect(() => {
