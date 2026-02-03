@@ -1,6 +1,6 @@
 /**
  * OpenHamClock - Main Application Component
- * Amateur Radio Dashboard v3.7.0
+ * Amateur Radio Dashboard
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 

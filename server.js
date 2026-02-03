@@ -1,5 +1,5 @@
 /**
- * OpenHamClock Server v3.10.0
+ * OpenHamClock Server
  * 
  * Express server that:
  * 1. Serves the static web application
@@ -24,6 +24,14 @@ const fetch = require('node-fetch');
 const net = require('net');
 const dgram = require('dgram');
 const fs = require('fs');
+
+// Read version from package.json as single source of truth
+const APP_VERSION = (() => {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8'));
+    return pkg.version || '0.0.0';
+  } catch { return '0.0.0'; }
+})();
 
 // Auto-create .env from .env.example on first run
 const envPath = path.join(__dirname, '.env');
@@ -2097,10 +2105,13 @@ app.get('/api/pskreporter/http/:callsign', async (req, res) => {
     clearTimeout(timeout);
     
     if (!response.ok) {
-      // On 503, set backoff period (15 minutes) to avoid hammering
+      // Back off on rate-limit or access errors to avoid hammering
       if (response.status === 503) {
         psk503Backoff = Date.now() + (15 * 60 * 1000);
         logErrorOnce('PSKReporter HTTP', '503 - backing off for 15 minutes');
+      } else if (response.status === 403 || response.status === 429) {
+        psk503Backoff = Date.now() + (30 * 60 * 1000);
+        logErrorOnce('PSKReporter HTTP', `${response.status} - backing off for 30 minutes (server-side HTTP proxy blocked; users unaffected via MQTT)`);
       }
       throw new Error(`HTTP ${response.status}`);
     }
@@ -2171,14 +2182,17 @@ app.get('/api/pskreporter/http/:callsign', async (req, res) => {
     res.json(result);
     
   } catch (error) {
-    logErrorOnce('PSKReporter HTTP', error.message);
+    // Don't re-log 403/503 errors - already logged above with backoff info
+    if (!error.message?.includes('HTTP 403') && !error.message?.includes('HTTP 503')) {
+      logErrorOnce('PSKReporter HTTP', error.message);
+    }
     
     // Return cached data if available (without error flag)
     if (pskHttpCache[cacheKey]) {
       return res.json({ ...pskHttpCache[cacheKey].data, cached: true, stale: true });
     }
     
-    // Return empty result without error flag for 503s (rate limiting is expected)
+    // Return empty result without error flag for rate limiting
     res.json({ 
       callsign, 
       direction, 
@@ -3553,7 +3567,7 @@ function getLastWeekendOfMonth(year, month) {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    version: '3.3.0',
+    version: APP_VERSION,
     uptime: process.uptime(),
     timestamp: new Date().toISOString()
   });
@@ -3568,7 +3582,7 @@ app.get('/api/health', (req, res) => {
 app.get('/api/config', (req, res) => {
   // Don't expose API keys/passwords - only public config
   res.json({
-    version: '3.10.0',
+    version: APP_VERSION,
     
     // Station info (from .env or config.json)
     callsign: CONFIG.callsign,
@@ -4490,6 +4504,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log('╚═══════════════════════════════════════════════════════╝');
   console.log('');
   const displayHost = HOST === '0.0.0.0' ? 'localhost' : HOST;
+  console.log(`  🌐 OpenHamClock v${APP_VERSION}`);
   console.log(`  🌐 Server running at http://${displayHost}:${PORT}`);
   if (HOST === '0.0.0.0') {
     console.log(`  🔗 Network access: http://<your-ip>:${PORT}`);

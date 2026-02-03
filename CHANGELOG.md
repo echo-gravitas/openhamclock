@@ -2,6 +2,22 @@
 
 All notable changes to OpenHamClock will be documented in this file.
 
+## [3.12.0] - 2025-02-03
+
+### Fixed
+- **PSKReporter MQTT** - Fixed critical bug: field mapping used `sa`/`ra` (ADIF country codes) instead of `sc`/`rc` (callsigns), so no MQTT spots ever matched
+- **PSKReporter RX topic** - Fixed subscription pattern that had one extra wildcard, subscribing to sender locator position instead of receiver callsign
+- **PSKReporter HTTP fallback** - If MQTT fails to connect within 12 seconds, automatically falls back to HTTP API so users always get data
+- **Map layer persistence** - Map style/zoom save was overwriting plugin layer settings (aurora, earthquakes, weather radar). Now merges correctly
+- **Version consistency** - All version numbers now read from package.json as single source of truth. Previously health endpoint said 3.3.0, config said 3.10.0, UI said 3.7.0
+- **PSKReporter 403 spam** - Server now backs off for 30 minutes on 403/429 responses instead of retrying every request
+
+### Added
+- **State persistence** - All user preferences now survive page refresh: PSK/WSJT-X panel mode, TX/RX tab, solar image wavelength, weather panel expanded state, temperature unit
+- **Collapsible weather** - DE location weather section collapses to one-line summary, expands for full details
+- **Lunar phase display** - 4th cycling mode in Solar panel shows current moon phase with SVG rendering, illumination %, and next full/new moon dates
+- **F°/C° toggle** - Switch temperature units with localStorage persistence; header always shows both
+
 ## [3.11.0] - 2025-02-02
 
 ### Added
