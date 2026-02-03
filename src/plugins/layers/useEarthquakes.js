@@ -96,8 +96,8 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null }) {
         mag: mag,
         geojson: `[lon=${coords[0]}, lat=${coords[1]}, depth=${coords[2]}]`,
         extracted: `lat=${lat} (coords[1]), lon=${lon} (coords[0])`,
-        leafletMarkerCall: `L.marker([${lon}, ${lat}])`,
-        explanation: `This map uses [longitude, latitude] format (non-standard)`
+        leafletMarkerCall: `L.marker([${lat}, ${lon}])`,
+        explanation: `Standard Leaflet [latitude, longitude] format`
       });
 
       currentQuakeIds.add(quakeId);
