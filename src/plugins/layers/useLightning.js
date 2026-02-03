@@ -42,43 +42,39 @@ function generateSimulatedStrikes(count = 50) {
     { lat: 13.7, lon: 100.5, name: 'Bangkok' }, // Bangkok
   ];
   
-  // Use a seeded random to generate consistent positions
-  const seed = Math.floor(now / 60000); // Changes every minute
-  
+  // Use strike INDEX as seed for completely stable positions
+  // Each strike always appears at the same location
   for (let i = 0; i < count; i++) {
-    // Use seeded random for consistent results
-    const seededRandom = (i + seed) * 9301 + 49297; // Simple LCG
+    const seed = i * 12345; // Each strike has fixed seed based on index
+    const seededRandom = seed * 9301 + 49297; // Simple LCG
     const r1 = (seededRandom % 233280) / 233280.0;
     const r2 = ((seededRandom * 7) % 233280) / 233280.0;
     const r3 = ((seededRandom * 13) % 233280) / 233280.0;
-    const r4 = ((seededRandom * 17) % 233280) / 233280.0;
     
-    // Pick a storm center based on seeded random
+    // Pick a storm center (always same center for this index)
     const center = stormCenters[Math.floor(r1 * stormCenters.length)];
     
-    // Create strike near the center with consistent offset
+    // Create strike near the center (always same offset for this index)
     const latOffset = (r2 - 0.5) * 2.0; // ~220 km spread
     const lonOffset = (r3 - 0.5) * 2.0;
     
-    // Age within last 30 minutes
-    const ageMs = r4 * 30 * 60 * 1000;
+    // Calculate fixed position for this strike
+    const lat = Math.round((center.lat + latOffset) * 10) / 10;
+    const lon = Math.round((center.lon + lonOffset) * 10) / 10;
+    
+    // Age cycles over time (strikes "age out" and "reappear" as fresh)
+    const cycleMs = 30 * 60 * 1000; // 30 minute cycle
+    const ageMs = ((now + (i * 10000)) % cycleMs); // Stagger ages
     const timestamp = now - ageMs;
     
-    // Calculate exact position (use rounded for stability)
-    const exactLat = center.lat + latOffset;
-    const exactLon = center.lon + lonOffset;
-    const roundedLat = Math.round(exactLat * 10) / 10;
-    const roundedLon = Math.round(exactLon * 10) / 10;
-    const roundedTime = Math.floor(timestamp / 60000) * 60000;
-    
-    // Use seeded random for intensity too
+    // Intensity fixed for this strike
     const intensity = (r2 * 200) - 50; // -50 to +150 kA
     const polarity = intensity >= 0 ? 'positive' : 'negative';
     
     strikes.push({
-      id: `strike_${roundedTime}_${roundedLat}_${roundedLon}`,
-      lat: roundedLat,  // Use rounded position for consistency
-      lon: roundedLon,  // Use rounded position for consistency
+      id: `strike_${i}_${lat}_${lon}`, // Index-based ID = always same
+      lat,  // Fixed position
+      lon,  // Fixed position
       timestamp,
       age: ageMs / 1000,
       intensity: Math.abs(intensity),
