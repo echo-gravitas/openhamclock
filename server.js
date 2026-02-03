@@ -2351,6 +2351,144 @@ app.get('/api/pskreporter/:callsign', async (req, res) => {
     });
   }
 });
+
+// ============================================
+// WSPR PROPAGATION HEATMAP API
+// ============================================
+
+// WSPR heatmap endpoint - gets global propagation data
+// Uses PSK Reporter to fetch WSPR mode spots from the last N minutes
+let wsprCache = { data: null, timestamp: 0 };
+const WSPR_CACHE_TTL = 5 * 60 * 1000; // 5 minutes cache
+
+app.get('/api/wspr/heatmap', async (req, res) => {
+  const minutes = parseInt(req.query.minutes) || 30; // Default 30 minutes
+  const band = req.query.band || 'all'; // all, 20m, 40m, etc.
+  const now = Date.now();
+  
+  // Return cached data if fresh
+  const cacheKey = `${minutes}:${band}`;
+  if (wsprCache.data && 
+      wsprCache.data.cacheKey === cacheKey && 
+      (now - wsprCache.timestamp) < WSPR_CACHE_TTL) {
+    return res.json({ ...wsprCache.data.result, cached: true });
+  }
+  
+  try {
+    const flowStartSeconds = -Math.abs(minutes * 60);
+    // Query PSK Reporter for WSPR mode spots (no specific callsign filter)
+    // Get data from multiple popular WSPR frequencies to build heatmap
+    const url = `https://retrieve.pskreporter.info/query?mode=WSPR&flowStartSeconds=${flowStartSeconds}&rronly=1&nolocator=0&appcontact=openhamclock&rptlimit=2000`;
+    
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+    
+    const response = await fetch(url, {
+      headers: { 
+        'User-Agent': 'OpenHamClock/3.12 (Amateur Radio Dashboard)',
+        'Accept': '*/*'
+      },
+      signal: controller.signal
+    });
+    clearTimeout(timeout);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const xml = await response.text();
+    const spots = [];
+    
+    // Parse XML response
+    const reportRegex = /<receptionReport[^>]*>/g;
+    let match;
+    while ((match = reportRegex.exec(xml)) !== null) {
+      const report = match[0];
+      const getAttr = (name) => {
+        const m = report.match(new RegExp(`${name}="([^"]*)"`));
+        return m ? m[1] : null;
+      };
+      
+      const receiverCallsign = getAttr('receiverCallsign');
+      const receiverLocator = getAttr('receiverLocator');
+      const senderCallsign = getAttr('senderCallsign');
+      const senderLocator = getAttr('senderLocator');
+      const frequency = getAttr('frequency');
+      const mode = getAttr('mode');
+      const flowStartSecs = getAttr('flowStartSeconds');
+      const sNR = getAttr('sNR');
+      
+      if (receiverCallsign && senderCallsign && senderLocator && receiverLocator) {
+        const freq = frequency ? parseInt(frequency) : null;
+        const spotBand = freq ? getBandFromHz(freq) : 'Unknown';
+        
+        // Filter by band if specified
+        if (band !== 'all' && spotBand !== band) continue;
+        
+        const senderLoc = gridToLatLonSimple(senderLocator);
+        const receiverLoc = gridToLatLonSimple(receiverLocator);
+        
+        if (senderLoc && receiverLoc) {
+          spots.push({
+            sender: senderCallsign,
+            senderGrid: senderLocator,
+            senderLat: senderLoc.lat,
+            senderLon: senderLoc.lon,
+            receiver: receiverCallsign,
+            receiverGrid: receiverLocator,
+            receiverLat: receiverLoc.lat,
+            receiverLon: receiverLoc.lon,
+            freq: freq,
+            freqMHz: freq ? (freq / 1000000).toFixed(3) : null,
+            band: spotBand,
+            snr: sNR ? parseInt(sNR) : null,
+            timestamp: flowStartSecs ? parseInt(flowStartSecs) * 1000 : Date.now(),
+            age: flowStartSecs ? Math.floor((Date.now() / 1000 - parseInt(flowStartSecs)) / 60) : 0
+          });
+        }
+      }
+    }
+    
+    // Sort by timestamp (newest first)
+    spots.sort((a, b) => b.timestamp - a.timestamp);
+    
+    const result = {
+      count: spots.length,
+      spots: spots,
+      minutes: minutes,
+      band: band,
+      timestamp: new Date().toISOString(),
+      source: 'pskreporter'
+    };
+    
+    // Cache it
+    wsprCache = { 
+      data: { result, cacheKey }, 
+      timestamp: now 
+    };
+    
+    console.log(`[WSPR Heatmap] Found ${spots.length} WSPR spots (${minutes}min, band: ${band})`);
+    res.json(result);
+    
+  } catch (error) {
+    logErrorOnce('WSPR Heatmap', error.message);
+    
+    // Return cached data if available
+    if (wsprCache.data && wsprCache.data.cacheKey === cacheKey) {
+      return res.json({ ...wsprCache.data.result, cached: true, stale: true });
+    }
+    
+    // Return empty result
+    res.json({ 
+      count: 0, 
+      spots: [],
+      minutes,
+      band,
+      error: error.message 
+    });
+  }
+});
+
 // ============================================
 // SATELLITE TRACKING API
 // ============================================
