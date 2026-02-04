@@ -2353,6 +2353,296 @@ app.get('/api/pskreporter/:callsign', async (req, res) => {
 });
 
 // ============================================
+// REVERSE BEACON NETWORK (RBN) API
+// ============================================
+
+// Convert lat/lon to Maidenhead grid (6-character)
+function latLonToGrid(lat, lon) {
+  if (!isFinite(lat) || !isFinite(lon)) return null;
+  
+  // Adjust longitude to 0-360 range
+  let adjLon = lon + 180;
+  let adjLat = lat + 90;
+  
+  // Field (2 chars): 20° lon x 10° lat
+  const field1 = String.fromCharCode(65 + Math.floor(adjLon / 20));
+  const field2 = String.fromCharCode(65 + Math.floor(adjLat / 10));
+  
+  // Square (2 digits): 2° lon x 1° lat
+  const square1 = Math.floor((adjLon % 20) / 2);
+  const square2 = Math.floor((adjLat % 10) / 1);
+  
+  // Subsquare (2 chars): 5' lon x 2.5' lat
+  const subsq1 = String.fromCharCode(65 + Math.floor(((adjLon % 2) * 60) / 5));
+  const subsq2 = String.fromCharCode(65 + Math.floor(((adjLat % 1) * 60) / 2.5));
+  
+  return `${field1}${field2}${square1}${square2}${subsq1}${subsq2}`.toUpperCase();
+}
+
+// Persistent RBN connection and spot storage
+let rbnConnection = null;
+let rbnSpots = []; // Rolling buffer of recent spots
+const MAX_RBN_SPOTS = 500; // Keep last 500 spots
+const RBN_SPOT_TTL = 30 * 60 * 1000; // 30 minutes
+const callsignLocationCache = new Map(); // Permanent cache for skimmer locations
+
+// Helper function to convert frequency to band
+function freqToBandKHz(freqKHz) {
+  if (freqKHz >= 1800 && freqKHz < 2000) return '160m';
+  if (freqKHz >= 3500 && freqKHz < 4000) return '80m';
+  if (freqKHz >= 7000 && freqKHz < 7300) return '40m';
+  if (freqKHz >= 10100 && freqKHz < 10150) return '30m';
+  if (freqKHz >= 14000 && freqKHz < 14350) return '20m';
+  if (freqKHz >= 18068 && freqKHz < 18168) return '17m';
+  if (freqKHz >= 21000 && freqKHz < 21450) return '15m';
+  if (freqKHz >= 24890 && freqKHz < 24990) return '12m';
+  if (freqKHz >= 28000 && freqKHz < 29700) return '10m';
+  if (freqKHz >= 50000 && freqKHz < 54000) return '6m';
+  return 'Other';
+}
+
+/**
+ * Maintain persistent connection to RBN Telnet
+ */
+function maintainRBNConnection(port = 7000) {
+  if (rbnConnection && !rbnConnection.destroyed) {
+    return; // Already connected
+  }
+  
+  console.log(`[RBN] Creating persistent connection to telnet.reversebeacon.net:${port}...`);
+  
+  let dataBuffer = '';
+  let authenticated = false;
+  const userCallsign = 'OPENHAMCLOCK'; // Generic callsign for the app
+  
+  const client = net.createConnection({ 
+    host: 'telnet.reversebeacon.net', 
+    port: port 
+  }, () => {
+    console.log(`[RBN] Persistent connection established`);
+  });
+
+  client.setEncoding('utf8');
+  client.setKeepAlive(true, 60000); // Keep alive every 60s
+  
+  client.on('data', (data) => {
+    dataBuffer += data;
+    
+    // Check for authentication prompt
+    if (!authenticated && dataBuffer.includes('Please enter your call:')) {
+      console.log(`[RBN] Authenticating as ${userCallsign}`);
+      client.write(`${userCallsign}\r\n`);
+      authenticated = true;
+      dataBuffer = '';
+      return;
+    }
+    
+    const lines = dataBuffer.split('\n');
+    dataBuffer = lines.pop() || '';
+    
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      
+      // Start collecting after authentication
+      if (authenticated && line.includes('Connected')) {
+        console.log(`[RBN] Authenticated, now streaming spots...`);
+        continue;
+      }
+      
+      // Parse RBN spot line format:
+      // DX de W3LPL-#:     7003.0  K3LR           CW    30 dB  23 WPM  CQ      0123Z
+      const spotMatch = line.match(/DX de\s+(\S+)\s*:\s*([\d.]+)\s+(\S+)\s+(\S+)\s+([-\d]+)\s+dB\s+(\d+)\s+WPM/);
+      
+      if (spotMatch) {
+        const [, skimmer, freq, dx, mode, snr, wpm] = spotMatch;
+        const timestamp = Date.now();
+        const freqNum = parseFloat(freq) * 1000;
+        const band = freqToBandKHz(freqNum / 1000);
+        
+        const spot = {
+          callsign: skimmer.replace(/-#.*$/, ''),
+          skimmerFull: skimmer,
+          dx: dx,
+          frequency: freqNum,
+          freqMHz: parseFloat(freq),
+          band: band,
+          mode: mode,
+          snr: parseInt(snr),
+          wpm: parseInt(wpm),
+          timestamp: new Date().toISOString(),
+          timestampMs: timestamp,
+          age: 0,
+          source: 'rbn-telnet',
+          grid: null // Will be filled by frontend from cache
+        };
+        
+        // Add to rolling buffer
+        rbnSpots.push(spot);
+        
+        // Keep only recent spots
+        if (rbnSpots.length > MAX_RBN_SPOTS) {
+          rbnSpots.shift();
+        }
+        
+        // Clean old spots
+        const cutoff = timestamp - RBN_SPOT_TTL;
+        rbnSpots = rbnSpots.filter(s => s.timestampMs > cutoff);
+      }
+    }
+  });
+
+  client.on('error', (err) => {
+    console.error(`[RBN] Connection error: ${err.message}`);
+    rbnConnection = null;
+    // Reconnect after 5 seconds
+    setTimeout(() => maintainRBNConnection(port), 5000);
+  });
+
+  client.on('close', () => {
+    console.log(`[RBN] Connection closed, reconnecting in 5s...`);
+    rbnConnection = null;
+    setTimeout(() => maintainRBNConnection(port), 5000);
+  });
+  
+  rbnConnection = client;
+}
+
+// Start persistent connection on server startup
+maintainRBNConnection(7000);
+
+// Endpoint to get recent RBN spots (no filtering, just return all recent spots)
+app.get('/api/rbn/spots', async (req, res) => {
+  const minutes = parseInt(req.query.minutes) || 30;
+  const limit = parseInt(req.query.limit) || 500;
+  
+  const now = Date.now();
+  const cutoff = now - (minutes * 60 * 1000);
+  
+  // Filter by time window
+  const recentSpots = rbnSpots
+    .filter(spot => spot.timestampMs > cutoff)
+    .slice(-limit); // Get most recent
+  
+  // Enrich spots with skimmer location data
+  const enrichedSpots = await Promise.all(recentSpots.map(async (spot) => {
+    const skimmerCall = spot.callsign;
+    
+    // Check cache first
+    if (callsignLocationCache.has(skimmerCall)) {
+      const location = callsignLocationCache.get(skimmerCall);
+      return {
+        ...spot,
+        grid: location.grid,
+        skimmerLat: location.lat,
+        skimmerLon: location.lon,
+        skimmerCountry: location.country
+      };
+    }
+    
+    // Lookup location (don't block on failures)
+    try {
+      const response = await fetch(`http://localhost:${PORT}/api/callsign/${skimmerCall}`);
+      if (response.ok) {
+        const locationData = await response.json();
+        const grid = latLonToGrid(locationData.lat, locationData.lon);
+        
+        const location = {
+          callsign: skimmerCall,
+          grid: grid,
+          lat: locationData.lat,
+          lon: locationData.lon,
+          country: locationData.country
+        };
+        
+        // Cache permanently
+        callsignLocationCache.set(skimmerCall, location);
+        
+        return {
+          ...spot,
+          grid: grid,
+          skimmerLat: locationData.lat,
+          skimmerLon: locationData.lon,
+          skimmerCountry: locationData.country
+        };
+      }
+    } catch (err) {
+      // Silent fail - return spot without location
+    }
+    
+    // Return spot as-is if lookup failed
+    return spot;
+  }));
+  
+  console.log(`[RBN] Returning ${enrichedSpots.length} enriched spots (last ${minutes} min)`);
+  
+  res.json({
+    count: enrichedSpots.length,
+    spots: enrichedSpots,
+    minutes: minutes,
+    timestamp: new Date().toISOString(),
+    source: 'rbn-telnet-stream'
+  });
+});
+
+// Endpoint to lookup skimmer location (cached permanently)
+app.get('/api/rbn/location/:callsign', async (req, res) => {
+  const callsign = req.params.callsign.toUpperCase();
+  
+  // Check cache first
+  if (callsignLocationCache.has(callsign)) {
+    return res.json(callsignLocationCache.get(callsign));
+  }
+  
+  try {
+    // Look up via HamQTH
+    const response = await fetch(`http://localhost:${PORT}/api/callsign/${callsign}`);
+    if (response.ok) {
+      const locationData = await response.json();
+      const grid = latLonToGrid(locationData.lat, locationData.lon);
+      
+      const result = {
+        callsign: callsign,
+        grid: grid,
+        lat: locationData.lat,
+        lon: locationData.lon,
+        country: locationData.country
+      };
+      
+      // Cache permanently (skimmers don't move!)
+      callsignLocationCache.set(callsign, result);
+      
+      return res.json(result);
+    }
+  } catch (err) {
+    console.warn(`[RBN] Failed to lookup ${callsign}: ${err.message}`);
+  }
+  
+  res.status(404).json({ error: 'Location not found' });
+});
+
+// Legacy endpoint for compatibility (deprecated)
+app.get('/api/rbn', async (req, res) => {
+  console.log('[RBN] Warning: Using deprecated /api/rbn endpoint, use /api/rbn/spots instead');
+  
+  const callsign = (req.query.callsign || '').toUpperCase().trim();
+  const minutes = parseInt(req.query.minutes) || 30;
+  const limit = parseInt(req.query.limit) || 100;
+  
+  if (!callsign || callsign === 'N0CALL') {
+    return res.json([]);
+  }
+  
+  const now = Date.now();
+  const cutoff = now - (minutes * 60 * 1000);
+  
+  // Filter spots for this callsign
+  const userSpots = rbnSpots
+    .filter(spot => spot.timestampMs > cutoff && spot.dx.toUpperCase() === callsign)
+    .slice(-limit);
+  
+  res.json(userSpots);
+});
+// ============================================
 // WSPR PROPAGATION HEATMAP API
 // ============================================
 
@@ -2488,6 +2778,7 @@ app.get('/api/wspr/heatmap', async (req, res) => {
     });
   }
 });
+
 
 // ============================================
 // SATELLITE TRACKING API

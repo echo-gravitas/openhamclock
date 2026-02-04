@@ -38,6 +38,7 @@ export const WorldMap = ({
   showWSJTX,
   onToggleSatellites, 
   hoveredSpot,
+  callsign = 'N0CALL',
   hideOverlays
 }) => {
   const mapRef = useRef(null);
@@ -760,6 +761,7 @@ export const WorldMap = ({
           enabled={pluginLayerStates[layerDef.id]?.enabled || false}
           opacity={pluginLayerStates[layerDef.id]?.opacity || layerDef.defaultOpacity}
           map={mapInstanceRef.current}
+          callsign={callsign}
         />
       ))}
       
