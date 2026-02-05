@@ -407,19 +407,21 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null, callsign,
           const data = await response.json();
           let spots = data.spots || [];
           
-          // Filter by callsign (TX or RX)
-          if (callsign && callsign !== 'N0CALL') {
+          // Strip suffixes from all callsigns
+          spots = spots.map(spot => {
+            return {
+              ...spot,
+              sender: stripCallsign(spot.sender),
+              receiver: stripCallsign(spot.receiver)
+            };
+          });
+          
+          // Filter by callsign ONLY if grid filter is OFF
+          if (!filterByGrid && callsign && callsign !== 'N0CALL') {
             const baseCall = stripCallsign(callsign);
-            console.log(`[WSPR] Filtering for callsign: ${baseCall}`);
+            console.log(`[WSPR] Filtering for callsign: ${baseCall} (grid filter OFF)`);
             
-            spots = spots.map(spot => {
-              // Strip suffixes from sender and receiver
-              return {
-                ...spot,
-                sender: stripCallsign(spot.sender),
-                receiver: stripCallsign(spot.receiver)
-              };
-            }).filter(spot => {
+            spots = spots.filter(spot => {
               // Show spots where I'm TX or RX
               const isTX = spot.sender === baseCall;
               const isRX = spot.receiver === baseCall;
@@ -427,6 +429,8 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null, callsign,
             });
             
             console.log(`[WSPR] Found ${spots.length} spots for ${baseCall} (TX or RX)`);
+          } else if (filterByGrid) {
+            console.log(`[WSPR] Grid filter ON - fetching ALL spots (${spots.length} total)`);
           }
           
           // Convert grid squares to lat/lon if coordinates are missing
@@ -466,7 +470,7 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null, callsign,
     const interval = setInterval(fetchWSPR, 300000);
 
     return () => clearInterval(interval);
-  }, [enabled, bandFilter, timeWindow, callsign]);
+  }, [enabled, bandFilter, timeWindow, callsign, filterByGrid]);
 
   // Create UI controls once (v1.2.0+)
   useEffect(() => {
