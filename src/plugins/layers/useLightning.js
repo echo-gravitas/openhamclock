@@ -756,10 +756,17 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null }) {
       return; // Already created
     }
     
+    // Check if config is available, if not set a timeout to retry
     if (!window.hamclockConfig) {
       console.log('[Lightning] Proximity: waiting for hamclockConfig...');
-      // Config not ready yet, will retry when lightningData updates
-      return;
+      const retryTimer = setTimeout(() => {
+        // Force a re-check by updating a dummy state
+        if (window.hamclockConfig && !proximityControl) {
+          console.log('[Lightning] Proximity: Config now available, creating panel...');
+          setLightningData(prev => [...prev]); // Trigger re-render
+        }
+      }, 2000);
+      return () => clearTimeout(retryTimer);
     }
     
     const config = window.hamclockConfig;
