@@ -20,6 +20,7 @@ import {
 } from './components';
 
 import { loadLayout, saveLayout, DEFAULT_LAYOUT } from './store/layoutStore.js';
+import { DockableLayoutProvider } from './contexts';
 import './styles/flexlayout-openhamclock.css';
 
 // Icons
@@ -142,7 +143,7 @@ export const DockableApp = ({
   }, [model, targetTabSetId, panelDefs]);
 
   // Render DE Location panel content
-  const renderDELocation = () => (
+  const renderDELocation = (nodeId) => (
     <div style={{ padding: '14px', height: '100%', overflowY: 'auto' }}>
       <div style={{ fontSize: '14px', color: 'var(--accent-cyan)', fontWeight: '700', marginBottom: '10px' }}>📍 DE - YOUR LOCATION</div>
       <div style={{ fontFamily: 'JetBrains Mono', fontSize: '14px' }}>
@@ -159,12 +160,13 @@ export const DockableApp = ({
         location={config.location}
         tempUnit={tempUnit}
         onTempUnitChange={(unit) => { setTempUnit(unit); try { localStorage.setItem('openhamclock_tempUnit', unit); } catch {} }}
+        nodeId={nodeId}
       />
     </div>
   );
 
   // Render DX Location panel
-  const renderDXLocation = () => (
+  const renderDXLocation = (nodeId) => (
     <div style={{ padding: '14px', height: '100%' }}>
       <div style={{ fontSize: '14px', color: 'var(--accent-green)', fontWeight: '700', marginBottom: '10px' }}>🎯 DX - TARGET</div>
       <div style={{ fontFamily: 'JetBrains Mono', fontSize: '14px' }}>
@@ -182,6 +184,7 @@ export const DockableApp = ({
           location={dxLocation}
           tempUnit={tempUnit}
           onTempUnitChange={(unit) => { setTempUnit(unit); try { localStorage.setItem('openhamclock_tempUnit', unit); } catch {} }}
+          nodeId={nodeId}
         />
       )}
     </div>
@@ -219,16 +222,17 @@ export const DockableApp = ({
   // Factory for rendering panel content
   const factory = useCallback((node) => {
     const component = node.getComponent();
+    const nodeId = node.getId();
 
     switch (component) {
       case 'world-map':
         return renderWorldMap();
 
       case 'de-location':
-        return renderDELocation();
+        return renderDELocation(nodeId);
 
       case 'dx-location':
-        return renderDXLocation();
+        return renderDXLocation(nodeId);
 
       case 'solar':
         return <SolarPanel solarIndices={solarIndices} />;
@@ -349,13 +353,15 @@ export const DockableApp = ({
 
       {/* Dockable Layout */}
       <div style={{ flex: 1, position: 'relative', padding: '8px', minHeight: 0 }}>
-        <Layout
-          ref={layoutRef}
-          model={model}
-          factory={factory}
-          onModelChange={handleModelChange}
-          onRenderTabSet={onRenderTabSet}
-        />
+        <DockableLayoutProvider model={model}>
+          <Layout
+            ref={layoutRef}
+            model={model}
+            factory={factory}
+            onModelChange={handleModelChange}
+            onRenderTabSet={onRenderTabSet}
+          />
+        </DockableLayoutProvider>
       </div>
 
       {/* Panel picker modal */}
