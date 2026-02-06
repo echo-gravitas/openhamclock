@@ -1,6 +1,8 @@
 /**
  * Layer Plugin Registry
  */
+
+import * as N3FJPLoggedQSOsPlugin from './layers/useN3FJPLoggedQSOs.js';
 import * as WXRadarPlugin from './layers/useWXRadar.js';
 import * as EarthquakesPlugin from './layers/useEarthquakes.js';
 import * as AuroraPlugin from './layers/useAurora.js';
@@ -19,9 +21,11 @@ const layerPlugins = [
   LightningPlugin,
   RBNPlugin,
   ContestQsosPlugin,
+  N3FJPLoggedQSOsPlugin,
 ];
 
 export function getAllLayers() {
+  console.log("Loaded layer plugins:", layerPlugins.map(p => p?.metadata?.id));
   return layerPlugins
     .filter(plugin => plugin.metadata && plugin.useLayer)
     .map(plugin => ({

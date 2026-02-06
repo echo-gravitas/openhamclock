@@ -68,6 +68,53 @@ const HOST = process.env.HOST || '0.0.0.0';
 // CONFIGURATION FROM ENVIRONMENT
 // ============================================
 
+function maidenheadToLatLon(grid) {
+  if (!grid) return null;
+  const g = String(grid).trim();
+  if (g.length < 4) return null;
+
+  const A = 'A'.charCodeAt(0);
+  const a = 'a'.charCodeAt(0);
+
+  const c0 = g.charCodeAt(0);
+  const c1 = g.charCodeAt(1);
+  const c2 = g.charCodeAt(2);
+  const c3 = g.charCodeAt(3);
+
+  // Field (A-R)
+  const lonField = (c0 >= a ? c0 - a : c0 - A);
+  const latField = (c1 >= a ? c1 - a : c1 - A);
+
+  // Square (0-9)
+  const lonSquare = parseInt(g[2], 10);
+  const latSquare = parseInt(g[3], 10);
+  if (!Number.isFinite(lonSquare) || !Number.isFinite(latSquare)) return null;
+
+  // Start at SW corner of the 4-char square
+  let lon = -180 + lonField * 20 + lonSquare * 2;
+  let lat =  -90 + latField * 10 + latSquare * 1;
+
+  // Subsquare (a-x), optional
+  if (g.length >= 6) {
+    const s0 = g.charCodeAt(4);
+    const s1 = g.charCodeAt(5);
+    const lonSub = (s0 >= a ? s0 - a : s0 - A);
+    const latSub = (s1 >= a ? s1 - a : s1 - A);
+    // each subsquare: 5' lon = 1/12 deg, 2.5' lat = 1/24 deg
+    lon += lonSub * (1/12);
+    lat += latSub * (1/24);
+    // center of subsquare
+    lon += (1/12) / 2;
+    lat += (1/24) / 2;
+  } else {
+    // center of 4-char square: 1 deg lon, 0.5 deg lat
+    lon += 1.0;
+    lat += 0.5;
+  }
+
+  return { lat, lon };
+}
+
 // Convert Maidenhead grid locator to lat/lon
 function gridToLatLon(grid) {
   if (!grid || grid.length < 4) return null;
@@ -5835,6 +5882,107 @@ function handleWSJTXMessage(msg, state) {
     }
   }
 }
+
+// ---- N3FJP Logged QSO relay (in-memory) ----
+const N3FJP_QSO_RETENTION_MINUTES = parseInt(process.env.N3FJP_QSO_RETENTION_MINUTES || "15", 10);
+let n3fjpQsos = [];
+
+function pruneN3fjpQsos() {
+  const cutoff = Date.now() - (N3FJP_QSO_RETENTION_MINUTES * 60 * 1000);
+  n3fjpQsos = n3fjpQsos.filter(q => {
+    const t = Date.parse(q.ts_utc || q.ts || "");
+    return !Number.isNaN(t) && t >= cutoff;
+  });
+}
+
+// Simple in-memory cache so we don't hammer callsign lookup on every QSO
+const n3fjpCallCache = new Map(); // key=callsign, val={ts, result}
+const N3FJP_CALL_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+async function lookupCallLatLon(callsign) {
+  const call = (callsign || "").toUpperCase().trim();
+  if (!call) return null;
+
+  const cached = n3fjpCallCache.get(call);
+  if (cached && (Date.now() - cached.ts) < N3FJP_CALL_CACHE_TTL_MS) {
+    return cached.result;
+  }
+
+  try {
+    // Reuse your existing endpoint (keeps all HamQTH/grid logic in one place)
+    const resp = await fetch(`http://localhost:${PORT}/api/callsign/${encodeURIComponent(call)}`);
+    if (!resp.ok) return null;
+
+    const data = await resp.json();
+    if (typeof data.lat === "number" && typeof data.lon === "number") {
+      n3fjpCallCache.set(call, { ts: Date.now(), result: data });
+      return data;
+    }
+  } catch (e) {
+    // swallow: mapping should never crash the server
+  }
+  return null;
+}
+
+// POST one QSO from a bridge (your Python script)
+app.post("/api/n3fjp/qso", async (req, res) => {
+  const qso = req.body || {};
+  if (!qso.dx_call) return res.status(400).json({ ok: false, error: "dx_call required" });
+
+  if (!qso.ts_utc) qso.ts_utc = new Date().toISOString();
+  if (!qso.source) qso.source = "n3fjp_to_timemapper_udp";
+
+  // Always ACK immediately so the bridge never times out
+  res.json({ ok: true });
+
+  // Do enrichment + storage after ACK
+  setImmediate(async () => {
+    try {
+      //
+      // Enrich DX location: GRID → (preferred) → HamQTH fallback
+      //
+      let locSource = "";
+
+      // 1) Prefer exact operating grid (N3FJP “Grid Rec” field)
+      if (qso.dx_grid) {
+        const loc = maidenheadToLatLon(qso.dx_grid);
+        if (loc) {
+          qso.lat = loc.lat;
+          qso.lon = loc.lon;
+          qso.loc_source = "grid";
+          locSource = "grid";
+        }
+      }
+
+      // 2) If no grid provided, fall back to HamQTH/home QTH lookup
+      if (!locSource) {
+        const dx = await lookupCallLatLon(qso.dx_call);
+        if (dx) {
+          qso.lat = dx.lat;
+          qso.lon = dx.lon;
+          qso.dx_country = dx.country || "";
+          qso.dx_cqZone = dx.cqZone || "";
+          qso.dx_ituZone = dx.ituZone || "";
+          qso.loc_source = "hamqth";
+        }
+      }
+
+      n3fjpQsos.unshift(qso);
+      pruneN3fjpQsos();
+
+      // cap memory
+      if (n3fjpQsos.length > 200) n3fjpQsos.length = 200;
+    } catch (e) {
+      console.error("[/api/n3fjp/qso] post-ack processing failed:", e);
+    }
+  });
+});
+
+// GET recent QSOs (pruned to retention window)
+app.get("/api/n3fjp/qsos", (req, res) => {
+  pruneN3fjpQsos();
+  res.json({ ok: true, retention_minutes: N3FJP_QSO_RETENTION_MINUTES, qsos: n3fjpQsos });
+});
 
 // Start UDP listener
 let wsjtxSocket = null;
