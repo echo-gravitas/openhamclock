@@ -103,9 +103,9 @@
             disconnect();
             
             const clientId = 'mqtt_test_' + Math.random().toString(16).slice(2, 10);
-            log(`Connecting to mqtt.pskreporter.info with clientId: ${clientId}`, 'log');
+            log(`Connecting to mqtt.pskreporter.info:1883 with clientId: ${clientId}`, 'log');
             
-            client = mqtt.connect('wss://mqtt.pskreporter.info:1886', {
+            client = mqtt.connect('ws://mqtt.pskreporter.info:1883', {
                 clientId: clientId,
                 clean: true,
                 reconnectPeriod: 5000,

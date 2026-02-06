@@ -484,12 +484,12 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null, callsign,
       }
     };
 
-    // Try MQTT first
-    console.log('[WSPR MQTT] Connecting to mqtt.pskreporter.info...');
+    // Try MQTT first - use ws:// on port 1883 (standard MQTT over WebSocket)
+    console.log('[WSPR MQTT] Connecting to mqtt.pskreporter.info:1883 (ws://)...');
     
     // MQTT topic: pskr/filter/v2/{band}/WSPR/{tx}/{rx}/{txgrid}/{rxgrid}/{txcountry}/{rxcountry}
     // Subscribe to all WSPR spots: pskr/filter/v2/+/WSPR/#
-    const client = mqtt.connect('wss://mqtt.pskreporter.info:1886', {
+    const client = mqtt.connect('ws://mqtt.pskreporter.info:1883', {
       clientId: `ohc_wspr_${Math.random().toString(16).slice(2, 10)}`,
       clean: true,
       reconnectPeriod: 5000,
