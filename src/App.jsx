@@ -155,6 +155,26 @@ const App = () => {
   const toggleDXLabels = useCallback(() => setMapLayers(prev => ({ ...prev, showDXLabels: !prev.showDXLabels })), []);
   const togglePOTA = useCallback(() => setMapLayers(prev => ({ ...prev, showPOTA: !prev.showPOTA })), []);
   const toggleSatellites = useCallback(() => setMapLayers(prev => ({ ...prev, showSatellites: !prev.showSatellites })), []);
+  
+  // Satellite filters
+  const [satelliteFilters, setSatelliteFilters] = useState(() => {
+    try {
+      const saved = localStorage.getItem('openhamclock_satelliteFilters');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) { return []; }
+  });
+  const [showSatelliteFilters, setShowSatelliteFilters] = useState(false);
+  
+  useEffect(() => {
+    try {
+      localStorage.setItem('openhamclock_satelliteFilters', JSON.stringify(satelliteFilters));
+    } catch (e) {}
+  }, [satelliteFilters]);
+  
+  // Filter satellites based on selection
+  const filteredSatellites = satelliteFilters.length > 0 
+    ? (satellites.data || []).filter(sat => satelliteFilters.includes(sat.name))
+    : satellites.data;
   const togglePSKReporter = useCallback(() => setMapLayers(prev => ({ ...prev, showPSKReporter: !prev.showPSKReporter })), []);
   const toggleWSJTX = useCallback(() => setMapLayers(prev => ({ ...prev, showWSJTX: !prev.showWSJTX })), []);
   
@@ -1446,7 +1466,9 @@ const App = () => {
             mySpots={mySpots.data}
             dxPaths={dxClusterData.paths}
             dxFilters={dxFilters}
-            satellites={satellites.data}
+            satellites={filteredSatellites}
+            satelliteFilters={satelliteFilters}
+            onSatelliteFiltersChange={() => setShowSatelliteFilters(true)}
             pskReporterSpots={filteredPskSpots}
             showDXPaths={mapLayers.showDXPaths}
             showDXLabels={mapLayers.showDXLabels}
@@ -1576,6 +1598,191 @@ const App = () => {
         isOpen={showPSKFilters}
         onClose={() => setShowPSKFilters(false)}
       />
+      
+      {/* Satellite Filter Modal */}
+      {showSatelliteFilters && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.8)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 10000
+        }} onClick={() => setShowSatelliteFilters(false)}>
+          <div style={{
+            background: 'var(--bg-secondary)',
+            border: '2px solid #00ffff',
+            borderRadius: '12px',
+            padding: '24px',
+            width: '600px',
+            maxHeight: '80vh',
+            overflowY: 'auto'
+          }} onClick={(e) => e.stopPropagation()}>
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '20px'
+            }}>
+              <h2 style={{
+                color: '#00ffff',
+                margin: 0,
+                fontFamily: 'Orbitron, monospace',
+                fontSize: '18px'
+              }}>⛊ Satellite Filters</h2>
+              <button
+                onClick={() => setShowSatelliteFilters(false)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text-secondary)',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  padding: '0 8px'
+                }}
+              >×</button>
+            </div>
+            
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              marginBottom: '16px',
+              paddingBottom: '12px',
+              borderBottom: '1px solid var(--border-color)'
+            }}>
+              <button
+                onClick={() => {
+                  const allSats = (satellites.data || []).map(s => s.name);
+                  setSatelliteFilters(allSats);
+                }}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid #00ffff',
+                  borderRadius: '4px',
+                  color: '#00ffff',
+                  padding: '6px 12px',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  fontFamily: 'JetBrains Mono'
+                }}
+              >Select All</button>
+              <button
+                onClick={() => setSatelliteFilters([])}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid #ff6666',
+                  borderRadius: '4px',
+                  color: '#ff6666',
+                  padding: '6px 12px',
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  fontFamily: 'JetBrains Mono'
+                }}
+              >Clear</button>
+            </div>
+            
+            <div style={{
+              fontSize: '11px',
+              color: 'var(--text-muted)',
+              marginBottom: '12px'
+            }}>
+              {satelliteFilters.length === 0 
+                ? 'Showing all satellites (no filter)' 
+                : `${satelliteFilters.length} satellite(s) selected`}
+            </div>
+            
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(2, 1fr)',
+              gap: '8px'
+            }}>
+              {(satellites.data || []).map(sat => {
+                const isSelected = satelliteFilters.includes(sat.name);
+                return (
+                  <button
+                    key={sat.name}
+                    onClick={() => {
+                      if (isSelected) {
+                        setSatelliteFilters(prev => prev.filter(n => n !== sat.name));
+                      } else {
+                        setSatelliteFilters(prev => [...prev, sat.name]);
+                      }
+                    }}
+                    style={{
+                      background: isSelected ? 'rgba(0, 255, 255, 0.15)' : 'var(--bg-tertiary)',
+                      border: `1px solid ${isSelected ? '#00ffff' : 'var(--border-color)'}`,
+                      borderRadius: '6px',
+                      padding: '10px',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      color: 'var(--text-primary)',
+                      fontFamily: 'JetBrains Mono',
+                      fontSize: '12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}
+                  >
+                    <span style={{
+                      width: '16px',
+                      height: '16px',
+                      borderRadius: '3px',
+                      border: `2px solid ${isSelected ? '#00ffff' : '#666'}`,
+                      background: isSelected ? '#00ffff' : 'transparent',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '10px',
+                      flexShrink: 0
+                    }}>
+                      {isSelected && '✓'}
+                    </span>
+                    <div style={{ flex: 1, overflow: 'hidden' }}>
+                      <div style={{ 
+                        color: isSelected ? '#00ffff' : 'var(--text-primary)',
+                        fontWeight: '600',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}>{sat.name}</div>
+                      {sat.visible !== undefined && (
+                        <div style={{
+                          fontSize: '9px',
+                          color: sat.visible ? '#00ff88' : 'var(--text-muted)',
+                          marginTop: '2px'
+                        }}>
+                          {sat.visible ? '● Visible' : '○ Below horizon'}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            
+            <button
+              onClick={() => setShowSatelliteFilters(false)}
+              style={{
+                marginTop: '20px',
+                width: '100%',
+                padding: '12px',
+                background: '#00ffff',
+                border: 'none',
+                borderRadius: '6px',
+                color: '#000',
+                fontSize: '14px',
+                fontWeight: '700',
+                cursor: 'pointer',
+                fontFamily: 'JetBrains Mono'
+              }}
+            >Done</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

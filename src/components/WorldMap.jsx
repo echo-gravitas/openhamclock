@@ -27,6 +27,8 @@ export const WorldMap = ({
   dxPaths, 
   dxFilters, 
   satellites, 
+  satelliteFilters,
+  onSatelliteFiltersChange,
   pskReporterSpots,
   wsjtxSpots,
   showDXPaths, 
@@ -801,26 +803,52 @@ export const WorldMap = ({
       
       {/* Satellite toggle */}
       {onToggleSatellites && (
-        <button
-          onClick={onToggleSatellites}
-          title={showSatellites ? 'Hide satellite tracks' : 'Show satellite tracks'}
-          style={{
-            position: 'absolute',
-            top: '10px',
-            left: '50px',
-            background: showSatellites ? 'rgba(0, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.8)',
-            border: `1px solid ${showSatellites ? '#00ffff' : '#666'}`,
-            color: showSatellites ? '#00ffff' : '#888',
-            padding: '6px 10px',
-            borderRadius: '4px',
-            fontSize: '11px',
-            fontFamily: 'JetBrains Mono',
-            cursor: 'pointer',
-            zIndex: 1000
-          }}
-        >
-          ⛊ SAT {showSatellites ? 'ON' : 'OFF'}
-        </button>
+        <div style={{
+          position: 'absolute',
+          top: '10px',
+          left: '50px',
+          display: 'flex',
+          gap: '4px',
+          zIndex: 1000
+        }}>
+          <button
+            onClick={onToggleSatellites}
+            title={showSatellites ? 'Hide satellite tracks' : 'Show satellite tracks'}
+            style={{
+              background: showSatellites ? 'rgba(0, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.8)',
+              border: `1px solid ${showSatellites ? '#00ffff' : '#666'}`,
+              color: showSatellites ? '#00ffff' : '#888',
+              padding: '6px 10px',
+              borderRadius: '4px',
+              fontSize: '11px',
+              fontFamily: 'JetBrains Mono',
+              cursor: 'pointer'
+            }}
+          >
+            ⛊ SAT {showSatellites ? 'ON' : 'OFF'}
+          </button>
+          {onSatelliteFiltersChange && (
+            <button
+              onClick={onSatelliteFiltersChange}
+              title="Filter satellites"
+              style={{
+                background: satelliteFilters && satelliteFilters.length > 0 ? 'rgba(0, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.8)',
+                border: `1px solid ${satelliteFilters && satelliteFilters.length > 0 ? '#00ffff' : '#666'}`,
+                color: satelliteFilters && satelliteFilters.length > 0 ? '#00ffff' : '#888',
+                padding: '6px 8px',
+                borderRadius: '4px',
+                fontSize: '11px',
+                fontFamily: 'JetBrains Mono',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              ⚙
+            </button>
+          )}
+        </div>
       )}
       
       {/* Labels toggle */}
