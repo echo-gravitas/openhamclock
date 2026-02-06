@@ -10,7 +10,9 @@ export const LocationPanel = ({
   dxLocation,
   deSunTimes,
   dxSunTimes,
-  currentTime
+  currentTime,
+  dxLocked,
+  onToggleDxLock
 }) => {
   const deGrid = calculateGridSquare(config.location.lat, config.location.lon);
   const dxGrid = calculateGridSquare(dxLocation.lat, dxLocation.lon);
@@ -70,13 +72,36 @@ export const LocationPanel = ({
           alignItems: 'center',
           marginBottom: '4px'
         }}>
-          <span style={{ 
-            color: 'var(--accent-blue)', 
-            fontWeight: '700', 
-            fontSize: '14px' 
-          }}>
-            DX Target
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ 
+              color: 'var(--accent-blue)', 
+              fontWeight: '700', 
+              fontSize: '14px' 
+            }}>
+              DX Target
+            </span>
+            {onToggleDxLock && (
+              <button
+                onClick={onToggleDxLock}
+                title={dxLocked ? 'Unlock DX position (allow map clicks)' : 'Lock DX position (prevent map clicks)'}
+                style={{
+                  background: dxLocked ? 'var(--accent-amber)' : 'var(--bg-tertiary)',
+                  color: dxLocked ? '#000' : 'var(--text-secondary)',
+                  border: '1px solid ' + (dxLocked ? 'var(--accent-amber)' : 'var(--border-color)'),
+                  borderRadius: '4px',
+                  padding: '2px 6px',
+                  fontSize: '10px',
+                  fontFamily: 'JetBrains Mono, monospace',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '3px'
+                }}
+              >
+                {dxLocked ? '🔒' : '🔓'}
+              </button>
+            )}
+          </div>
           <span style={{ 
             color: 'var(--accent-green)', 
             fontFamily: 'JetBrains Mono, monospace',

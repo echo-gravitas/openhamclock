@@ -21,7 +21,8 @@ import { DXNewsTicker } from './DXNewsTicker.jsx';
 export const WorldMap = ({ 
   deLocation, 
   dxLocation, 
-  onDXChange, 
+  onDXChange,
+  dxLocked,
   potaSpots, 
   mySpots, 
   dxPaths, 
@@ -59,6 +60,12 @@ export const WorldMap = ({
   const pskMarkersRef = useRef([]);
   const wsjtxMarkersRef = useRef([]);
   const countriesLayerRef = useRef(null);
+  const dxLockedRef = useRef(dxLocked);
+
+  // Keep dxLockedRef in sync with prop
+  useEffect(() => {
+    dxLockedRef.current = dxLocked;
+  }, [dxLocked]);
 
   // Plugin system refs and state
   const pluginLayersRef = useRef({});
@@ -148,9 +155,9 @@ export const WorldMap = ({
       }
     }, 60000);
 
-    // Click handler for setting DX
+    // Click handler for setting DX (only if not locked)
     map.on('click', (e) => {
-      if (onDXChange) {
+      if (onDXChange && !dxLockedRef.current) {
         onDXChange({ lat: e.latlng.lat, lon: e.latlng.lng });
       }
     });

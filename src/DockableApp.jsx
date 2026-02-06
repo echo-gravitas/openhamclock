@@ -43,6 +43,8 @@ export const DockableApp = ({
   deSunTimes,
   dxSunTimes,
   handleDXChange,
+  dxLocked,
+  handleToggleDxLock,
 
   // Weather
   localWeather,
@@ -169,7 +171,30 @@ export const DockableApp = ({
   // Render DX Location panel
   const renderDXLocation = (nodeId) => (
     <div style={{ padding: '14px', height: '100%' }}>
-      <div style={{ fontSize: '14px', color: 'var(--accent-green)', fontWeight: '700', marginBottom: '10px' }}>🎯 DX - TARGET</div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+        <div style={{ fontSize: '14px', color: 'var(--accent-green)', fontWeight: '700' }}>🎯 DX - TARGET</div>
+        {handleToggleDxLock && (
+          <button
+            onClick={handleToggleDxLock}
+            title={dxLocked ? 'Unlock DX position (allow map clicks)' : 'Lock DX position (prevent map clicks)'}
+            style={{
+              background: dxLocked ? 'var(--accent-amber)' : 'var(--bg-tertiary)',
+              color: dxLocked ? '#000' : 'var(--text-secondary)',
+              border: '1px solid ' + (dxLocked ? 'var(--accent-amber)' : 'var(--border-color)'),
+              borderRadius: '4px',
+              padding: '2px 6px',
+              fontSize: '10px',
+              fontFamily: 'JetBrains Mono, monospace',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px'
+            }}
+          >
+            {dxLocked ? '🔒' : '🔓'}
+          </button>
+        )}
+      </div>
       <div style={{ fontFamily: 'JetBrains Mono', fontSize: '14px' }}>
         <div style={{ color: 'var(--accent-amber)', fontSize: '22px', fontWeight: '700' }}>{dxGrid}</div>
         <div style={{ color: 'var(--text-secondary)', fontSize: '13px', marginTop: '4px' }}>{dxLocation.lat.toFixed(4)}°, {dxLocation.lon.toFixed(4)}°</div>
@@ -198,6 +223,7 @@ export const DockableApp = ({
         deLocation={config.location}
         dxLocation={dxLocation}
         onDXChange={handleDXChange}
+        dxLocked={dxLocked}
         potaSpots={potaSpots.data}
         mySpots={mySpots.data}
         dxPaths={dxClusterData.paths}
@@ -307,7 +333,8 @@ export const DockableApp = ({
     propagation, bandConditions, dxClusterData, dxFilters, hoveredSpot, mapLayers, potaSpots,
     mySpots, satellites, filteredPskSpots, wsjtxMapSpots, dxpeditions, contests,
     pskFilters, wsjtx, handleDXChange, setDxFilters, setShowDXFilters, setShowPSKFilters,
-    setHoveredSpot, toggleDXPaths, toggleDXLabels, togglePOTA, toggleSatellites, togglePSKReporter, toggleWSJTX
+    setHoveredSpot, toggleDXPaths, toggleDXLabels, togglePOTA, toggleSatellites, togglePSKReporter, toggleWSJTX,
+    dxLocked, handleToggleDxLock
   ]);
 
   // Add + button to tabsets

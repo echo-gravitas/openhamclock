@@ -108,6 +108,25 @@ const App = () => {
     } catch (e) {}
   }, [dxLocation]);
   
+  // DX Location Lock state with localStorage persistence
+  const [dxLocked, setDxLocked] = useState(() => {
+    try {
+      const stored = localStorage.getItem('openhamclock_dxLocked');
+      return stored === 'true';
+    } catch (e) {}
+    return false;
+  });
+  
+  useEffect(() => {
+    try {
+      localStorage.setItem('openhamclock_dxLocked', dxLocked.toString());
+    } catch (e) {}
+  }, [dxLocked]);
+  
+  const handleToggleDxLock = useCallback(() => {
+    setDxLocked(prev => !prev);
+  }, []);
+  
   // UI state
   const [showSettings, setShowSettings] = useState(false);
   const [showDXFilters, setShowDXFilters] = useState(false);
@@ -417,6 +436,8 @@ const App = () => {
           deSunTimes={deSunTimes}
           dxSunTimes={dxSunTimes}
           handleDXChange={handleDXChange}
+          dxLocked={dxLocked}
+          handleToggleDxLock={handleToggleDxLock}
           localWeather={localWeather}
           tempUnit={tempUnit}
           setTempUnit={setTempUnit}
@@ -668,6 +689,7 @@ const App = () => {
                 deLocation={config.location}
                 dxLocation={dxLocation}
                 onDXChange={handleDXChange}
+                dxLocked={dxLocked}
                 potaSpots={potaSpots.data}
                 mySpots={mySpots.data}
                 dxPaths={dxClusterData.paths}
@@ -859,6 +881,7 @@ const App = () => {
                 deLocation={config.location}
                 dxLocation={dxLocation}
                 onDXChange={handleDXChange}
+                dxLocked={dxLocked}
                 potaSpots={potaSpots.data}
                 mySpots={mySpots.data}
                 dxPaths={dxClusterData.paths}
@@ -1175,6 +1198,7 @@ const App = () => {
                 deLocation={config.location}
                 dxLocation={dxLocation}
                 onDXChange={handleDXChange}
+                dxLocked={dxLocked}
                 potaSpots={potaSpots.data}
                 mySpots={mySpots.data}
                 dxPaths={dxClusterData.paths}
@@ -1463,6 +1487,7 @@ const App = () => {
             deLocation={config.location}
             dxLocation={dxLocation}
             onDXChange={handleDXChange}
+            dxLocked={dxLocked}
             potaSpots={potaSpots.data}
             mySpots={mySpots.data}
             dxPaths={dxClusterData.paths}
