@@ -57,7 +57,7 @@ The Global Clouds plugin provides a real-time satellite-derived cloud cover over
 ## 🔧 Usage
 
 ### Basic Setup
-1. **Configure API Key**: Ensure `OPENWEATHER_API_KEY` is set in your `.env` file.
+1. **Configure API Key**: Ensure `VITE_OPENWEATHER_API_KEY=` is set in your `.env` file. Same as your standard OPEN Weather API KEY
 2. **Enable Plugin**: Open **Settings** → **Map Layers** and toggle **☁️ Global Clouds**.
 3. **Adjust Opacity**: Use the **Opacity** slider to find the right balance (Default: 50%).
 
