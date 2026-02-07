@@ -808,16 +808,16 @@ export const WorldMap = ({
       
       {/* Render all plugin layers */}
 		{mapInstanceRef.current && getAllLayers().map(layerDef => {
-		  // Pull the state, but provide a fallback to your metadata defaults
-		  const layerState = pluginLayerStates[layerDef.id] || {};
-		  
+		  // 1. Get the current state for this layer ID
+		  const currentState = pluginLayerStates[layerDef.id];
+		
 		  return (
 		    <PluginLayer
 		      key={layerDef.id}
 		      plugin={layerDef}
-		      // Use the '??' operator to fall back to defaults if state is undefined
-		      enabled={layerState.enabled ?? layerDef.defaultEnabled}
-		      opacity={layerState.opacity ?? layerDef.defaultOpacity}
+		      // 2. Add fallbacks using the '??' operator
+		      enabled={currentState?.enabled ?? layerDef.defaultEnabled}
+		      opacity={currentState?.opacity ?? layerDef.defaultOpacity}
 		      map={mapInstanceRef.current}
 		    />
 		  );
