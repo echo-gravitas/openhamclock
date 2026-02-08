@@ -10,12 +10,13 @@ import {
   getMoonPosition, 
   getGreatCirclePoints 
 } from '../utils/geo.js';
-import { filterDXPaths, getBandColor } from '../utils/callsign.js';
+import { getBandColor } from '../utils/callsign.js';
 
 import { getAllLayers } from '../plugins/layerRegistry.js';
 import { IconSatellite, IconTag, IconSun, IconMoon } from './Icons.jsx';
 import PluginLayer from './PluginLayer.jsx';
 import { DXNewsTicker } from './DXNewsTicker.jsx';
+import {filterDXPaths} from "../utils";
 
 
 export const WorldMap = ({ 
