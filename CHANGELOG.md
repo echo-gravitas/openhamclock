@@ -2,6 +2,25 @@
 
 All notable changes to OpenHamClock will be documented in this file.
 
+## [15.0.1] - 2026-02-08
+
+### Added
+- **Per-panel font sizing (Dockable Mode)** — A−/A+ buttons in each panel's tabset header. 10 zoom steps from 70% to 200%, persisted per-panel in localStorage. Percentage badge shown when zoomed; click to reset. World Map excluded (has its own zoom)
+- **DX News Ticker toggle** — New checkbox in Settings → Map Layers tab to show/hide the scrolling DX news ticker. Persisted in localStorage with other map layer settings
+- **Weather proxy** — New `/api/weather` server endpoint proxies Open-Meteo requests. Coordinates rounded to ~11km grid for cache sharing across users. 15-minute cache, 1-hour stale serving on rate limit/errors. Client debounced (2s) to prevent rapid-fire calls when clicking through DX spots
+
+### Changed
+- **ITU-R P.533 by default** — All installs now use the public OpenHamClock ITURHFProp service (`proppy-production.up.railway.app`) for propagation predictions out of the box. No `.env` configuration needed. Self-hosting still supported via `ITURHFPROP_URL` override
+
+### Fixed
+- **DX Cluster spot clicks** — Clicking a DX cluster spot now updates the DX panel and map. Root cause: `DXClusterPanel` had no `onClick` handler; paths data with coordinates wasn't being looked up. Fixed across Modern, Classic, and Dockable layouts
+- **RBN layer showing N0CALL** — RBN (and all plugin layers) showed "N0CALL" instead of the user's callsign. Root cause: `WorldMap` wasn't passing `callsign`, `locator`, or `lowMemoryMode` to `PluginLayer`. Also fixed 4 of 6 `WorldMap` instances across layouts that were missing the `callsign` prop entirely
+- **Update button fails with "Local changes detected"** — `git status --porcelain` blocked updates when file permissions changed (e.g., `chmod +x update.sh`) or on cross-platform mode differences. Fix: `git config core.fileMode false` set at server startup, in setup scripts, and in `update.sh`. Auto-update now stashes local changes before pulling instead of refusing
+- **Update button missing in Dockable Mode** — `DockableApp` wasn't passing `onUpdateClick`, `updateInProgress`, or `showUpdateButton` to the Header component
+- **WSJT-X relay agent ECONNRESET** — Relay v1.1.0: added `Connection: close` header, startup connectivity test, clear error diagnostics for ECONNRESET/ECONNREFUSED/DNS/timeout
+- **Pi kiosk mode loses settings on reboot** — Chromium `--incognito` flag wiped localStorage on every restart. Replaced with dedicated `--user-data-dir` profile. `update.sh` auto-patches existing kiosk installs
+- **Open-Meteo 429 rate limiting** — Client-side Open-Meteo calls replaced with server-side proxy (see Weather proxy above)
+
 ## [15.0.0] - 2026-02-08
 
 ### Added

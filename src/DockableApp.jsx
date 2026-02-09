@@ -98,12 +98,51 @@ export const DockableApp = ({
   setShowSettings,
   handleFullscreenToggle,
   isFullscreen,
+
+  // Update
+  handleUpdateClick,
+  updateInProgress,
+  isLocalInstall,
 }) => {
   const layoutRef = useRef(null);
   const [model, setModel] = useState(() => Model.fromJson(loadLayout()));
   const [showPanelPicker, setShowPanelPicker] = useState(false);
   const [targetTabSetId, setTargetTabSetId] = useState(null);
   const saveTimeoutRef = useRef(null);
+
+  // Per-panel zoom levels (persisted)
+  const [panelZoom, setPanelZoom] = useState(() => {
+    try {
+      const stored = localStorage.getItem('openhamclock_panelZoom');
+      return stored ? JSON.parse(stored) : {};
+    } catch { return {}; }
+  });
+
+  useEffect(() => {
+    try { localStorage.setItem('openhamclock_panelZoom', JSON.stringify(panelZoom)); } catch {}
+  }, [panelZoom]);
+
+  const ZOOM_STEPS = [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.5, 1.75, 2.0];
+  const adjustZoom = useCallback((component, delta) => {
+    setPanelZoom(prev => {
+      const current = prev[component] || 1.0;
+      const currentIdx = ZOOM_STEPS.findIndex(s => s >= current - 0.01);
+      const newIdx = Math.max(0, Math.min(ZOOM_STEPS.length - 1, (currentIdx >= 0 ? currentIdx : 3) + delta));
+      const newZoom = ZOOM_STEPS[newIdx];
+      if (newZoom === 1.0) {
+        const { [component]: _, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [component]: newZoom };
+    });
+  }, []);
+
+  const resetZoom = useCallback((component) => {
+    setPanelZoom(prev => {
+      const { [component]: _, ...rest } = prev;
+      return rest;
+    });
+  }, []);
 
   // Handle model changes with debounced save
   const handleModelChange = useCallback((newModel) => {
@@ -238,7 +277,7 @@ export const DockableApp = ({
         showPSKReporter={mapLayers.showPSKReporter}
         wsjtxSpots={wsjtxMapSpots}
         showWSJTX={mapLayers.showWSJTX}
-        showDxNews={config.showDxNews}
+        showDXNews={mapLayers.showDXNews}
         onToggleSatellites={toggleSatellites}
         hoveredSpot={hoveredSpot}
         leftSidebarVisible={true}
@@ -254,27 +293,33 @@ export const DockableApp = ({
     const component = node.getComponent();
     const nodeId = node.getId();
 
+    let content;
     switch (component) {
       case 'world-map':
-        return renderWorldMap();
+        return renderWorldMap(); // Map has its own zoom — skip panel zoom
 
       case 'de-location':
-        return renderDELocation(nodeId);
+        content = renderDELocation(nodeId);
+        break;
 
       case 'dx-location':
-        return renderDXLocation(nodeId);
+        content = renderDXLocation(nodeId);
+        break;
 
       case 'analog-clock':
-        return <AnalogClockPanel currentTime={currentTime} sunTimes={deSunTimes} />;
+        content = <AnalogClockPanel currentTime={currentTime} sunTimes={deSunTimes} />;
+        break;
 
       case 'solar':
-        return <SolarPanel solarIndices={solarIndices} />;
+        content = <SolarPanel solarIndices={solarIndices} />;
+        break;
 
       case 'propagation':
-        return <PropagationPanel propagation={propagation.data} loading={propagation.loading} bandConditions={bandConditions} />;
+        content = <PropagationPanel propagation={propagation.data} loading={propagation.loading} bandConditions={bandConditions} />;
+        break;
 
       case 'dx-cluster':
-        return (
+        content = (
           <DXClusterPanel
             data={dxClusterData.spots}
             loading={dxClusterData.loading}
@@ -294,9 +339,10 @@ export const DockableApp = ({
             onToggleMap={toggleDXPaths}
           />
         );
+        break;
 
       case 'psk-reporter':
-        return (
+        content = (
           <PSKReporterPanel
             callsign={config.callsign}
             showOnMap={mapLayers.showPSKReporter}
@@ -322,36 +368,96 @@ export const DockableApp = ({
             onToggleWSJTXMap={toggleWSJTX}
           />
         );
+        break;
 
       case 'dxpeditions':
-        return <DXpeditionPanel data={dxpeditions.data} loading={dxpeditions.loading} />;
+        content = <DXpeditionPanel data={dxpeditions.data} loading={dxpeditions.loading} />;
+        break;
 
       case 'pota':
-        return <POTAPanel data={potaSpots.data} loading={potaSpots.loading} showOnMap={mapLayers.showPOTA} onToggleMap={togglePOTA} />;
+        content = <POTAPanel data={potaSpots.data} loading={potaSpots.loading} showOnMap={mapLayers.showPOTA} onToggleMap={togglePOTA} />;
+        break;
 
       case 'contests':
-        return <ContestPanel data={contests.data} loading={contests.loading} />;
+        content = <ContestPanel data={contests.data} loading={contests.loading} />;
+        break;
 
       default:
-        // Handle legacy layout components - prompt user to reset
-        return (
+        content = (
           <div style={{ padding: '20px', color: '#ff6b6b', textAlign: 'center' }}>
             <div style={{ fontSize: '14px', marginBottom: '8px' }}>Outdated panel: {component}</div>
             <div style={{ fontSize: '12px', color: '#888' }}>Click "Reset" button below to update layout</div>
           </div>
         );
     }
+
+    // Apply per-panel zoom
+    const zoom = panelZoom[component] || 1.0;
+    if (zoom !== 1.0) {
+      return (
+        <div style={{ zoom, width: '100%', height: '100%', transformOrigin: 'top left' }}>
+          {content}
+        </div>
+      );
+    }
+    return content;
   }, [
     config, deGrid, dxGrid, dxLocation, deSunTimes, dxSunTimes, showDxWeather, tempUnit, solarIndices,
     propagation, bandConditions, dxClusterData, dxFilters, hoveredSpot, mapLayers, potaSpots,
     mySpots, satellites, filteredPskSpots, wsjtxMapSpots, dxpeditions, contests,
     pskFilters, wsjtx, handleDXChange, setDxFilters, setShowDXFilters, setShowPSKFilters,
     setHoveredSpot, toggleDXPaths, toggleDXLabels, togglePOTA, toggleSatellites, togglePSKReporter, toggleWSJTX,
-    dxLocked, handleToggleDxLock
+    dxLocked, handleToggleDxLock, panelZoom
   ]);
 
-  // Add + button to tabsets
+  // Add + and font size buttons to tabsets
   const onRenderTabSet = useCallback((node, renderValues) => {
+    // Get the active tab's component name for zoom controls
+    const selectedNode = node.getSelectedNode?.();
+    const selectedComponent = selectedNode?.getComponent?.();
+
+    // Skip zoom controls for world-map
+    if (selectedComponent && selectedComponent !== 'world-map') {
+      const currentZoom = panelZoom[selectedComponent] || 1.0;
+      const zoomPct = Math.round(currentZoom * 100);
+
+      renderValues.stickyButtons.push(
+        <button
+          key="zoom-out"
+          title="Decrease font size"
+          className="flexlayout__tab_toolbar_button"
+          onClick={(e) => { e.stopPropagation(); adjustZoom(selectedComponent, -1); }}
+          style={{ fontSize: '11px', fontWeight: '700', fontFamily: 'JetBrains Mono, monospace', padding: '0 3px', opacity: currentZoom <= 0.7 ? 0.3 : 1 }}
+        >
+          A−
+        </button>
+      );
+      if (currentZoom !== 1.0) {
+        renderValues.stickyButtons.push(
+          <button
+            key="zoom-reset"
+            title="Reset font size"
+            className="flexlayout__tab_toolbar_button"
+            onClick={(e) => { e.stopPropagation(); resetZoom(selectedComponent); }}
+            style={{ fontSize: '9px', fontFamily: 'JetBrains Mono, monospace', padding: '0 2px', color: 'var(--accent-amber)' }}
+          >
+            {zoomPct}%
+          </button>
+        );
+      }
+      renderValues.stickyButtons.push(
+        <button
+          key="zoom-in"
+          title="Increase font size"
+          className="flexlayout__tab_toolbar_button"
+          onClick={(e) => { e.stopPropagation(); adjustZoom(selectedComponent, 1); }}
+          style={{ fontSize: '11px', fontWeight: '700', fontFamily: 'JetBrains Mono, monospace', padding: '0 3px', opacity: currentZoom >= 2.0 ? 0.3 : 1 }}
+        >
+          A+
+        </button>
+      );
+    }
+
     renderValues.stickyButtons.push(
       <button
         key="add"
@@ -362,7 +468,7 @@ export const DockableApp = ({
         <PlusIcon />
       </button>
     );
-  }, []);
+  }, [panelZoom, adjustZoom, resetZoom]);
 
   // Get unused panels
   const getAvailablePanels = useCallback(() => {
@@ -392,6 +498,9 @@ export const DockableApp = ({
           onSettingsClick={() => setShowSettings(true)}
           onFullscreenToggle={handleFullscreenToggle}
           isFullscreen={isFullscreen}
+          onUpdateClick={handleUpdateClick}
+          updateInProgress={updateInProgress}
+          showUpdateButton={isLocalInstall}
         />
       </div>
 

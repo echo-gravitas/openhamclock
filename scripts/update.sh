@@ -44,6 +44,10 @@ if [ ! -d ".git" ]; then
     exit 1
 fi
 
+# Prevent file permission changes from being detected as modifications
+# (e.g. chmod +x on scripts, different umask on Pi vs desktop)
+git config core.fileMode false 2>/dev/null
+
 echo "📋 Current version:"
 grep '"version"' package.json | head -1
 
@@ -99,6 +103,13 @@ fi
 
 echo ""
 echo "⬇️  Pulling latest changes..."
+
+# Stash any local changes (permission changes, build artifacts, etc.)
+if [ -n "$(git status --porcelain)" ]; then
+    echo "   Stashing local changes..."
+    git stash --include-untracked 2>/dev/null || git checkout . 2>/dev/null
+fi
+
 git pull origin main 2>/dev/null || git pull origin master
 
 echo ""

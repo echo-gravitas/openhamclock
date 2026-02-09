@@ -284,7 +284,7 @@ export default function ModernLayout(props) {
           showPSKReporter={mapLayers.showPSKReporter}
           wsjtxSpots={wsjtxMapSpots}
           showWSJTX={mapLayers.showWSJTX}
-          showDxNews={config.showDxNews}
+          showDXNews={mapLayers.showDXNews}
           onToggleSatellites={toggleSatellites}
           hoveredSpot={hoveredSpot}
           callsign={config.callsign}

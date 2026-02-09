@@ -331,7 +331,7 @@ HF propagation reliability predictions between your station (DE) and whatever DX
 
 **Standard mode:** Uses a built-in propagation model based on current SFI, SSN, Kp, great-circle path distance, solar zenith angle, geomagnetic latitude, and estimated MUF (Maximum Usable Frequency) for each band.
 
-**Advanced mode (ITURHFProp):** If you deploy the optional ITURHFProp microservice (in the `iturhfprop-service/` directory), propagation predictions use the full ITU-R P.533 recommendation model. This is the international standard for HF propagation prediction and provides significantly more accurate results. Set `ITURHFPROP_URL` in `.env` to enable this.
+**ITU-R P.533-14 predictions:** By default, all installs use the public OpenHamClock ITURHFProp prediction service for ITU-R P.533-14 propagation calculations — the international standard for HF propagation prediction. If you prefer to self-host, deploy the optional ITURHFProp microservice (in the `iturhfprop-service/` directory) and set `ITURHFPROP_URL` in `.env` to your own instance.
 
 **Hybrid correction:** When ionosonde data is available from `prop.kc2g.com`, the system applies real-time corrections based on actual measured ionospheric conditions rather than just modeled values. This can catch unusual propagation events that models miss.
 
@@ -677,7 +677,7 @@ All configuration is done through the `.env` file. On first run, this file is au
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OPENWEATHER_API_KEY` | *(none)* | OpenWeatherMap API key. Optional — Open-Meteo is used by default and requires no key. Get a free key at [openweathermap.org/api](https://openweathermap.org/api). |
-| `ITURHFPROP_URL` | *(none)* | URL of your ITURHFProp microservice for ITU-R P.533 propagation predictions. Only set this if you've deployed the `iturhfprop-service/`. |
+| `ITURHFPROP_URL` | Public service | URL for ITU-R P.533 propagation predictions. Defaults to the public OpenHamClock service. Override only if self-hosting the `iturhfprop-service/`. |
 | `DXSPIDER_PROXY_URL` | *(none)* | URL of your DX Spider proxy. A default proxy is provided, so you only need this if you're running your own. |
 
 ### WSJT-X Integration
@@ -992,7 +992,7 @@ openhamclock/
 │   └── styles/
 │       └── main.css              # Theme CSS variables, base styles, responsive breakpoints
 ├── dxspider-proxy/           # DX Spider telnet proxy microservice
-├── iturhfprop-service/       # ITU-R P.533 propagation prediction microservice (optional)
+├── iturhfprop-service/       # ITU-R P.533 propagation prediction microservice (self-host alternative)
 ├── wsjtx-relay/              # WSJT-X UDP → HTTPS relay agent
 ├── electron/                 # Electron desktop app wrapper (experimental)
 ├── scripts/                  # Setup and update scripts
@@ -1041,6 +1041,7 @@ The backend exposes these REST endpoints. All data endpoints return JSON. Cache 
 | `GET /api/version` | Lightweight version check (for auto-refresh polling) | no-cache |
 | `GET /api/health` | Health dashboard with uptime, visitors, concurrent users, session analytics, API traffic | — |
 | `GET /api/n0nbh` | N0NBH band conditions (SFI, K, bands, VHF, geomag, signal noise, MUF) | 1 hr |
+| `GET /api/weather?lat=&lon=` | Weather proxy (Open-Meteo). Coordinates rounded to ~11km grid for cache sharing | 15 min |
 | `GET /api/dxcluster/spots` | Current DX cluster spots (array of spot objects) | 5 sec |
 | `GET /api/dxcluster/paths` | DX spots with resolved coordinates for map display | 5 sec |
 | `GET /api/dxcluster/sources` | Available DX cluster source backends | — |

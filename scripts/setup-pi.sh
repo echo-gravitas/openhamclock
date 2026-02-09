@@ -144,6 +144,9 @@ setup_repository() {
         cd "$INSTALL_DIR"
     fi
     
+    # Prevent file permission changes from blocking future updates
+    git config core.fileMode false 2>/dev/null
+    
     # Install npm dependencies
     npm install
     
