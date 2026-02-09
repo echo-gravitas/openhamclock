@@ -279,6 +279,7 @@ export default function ClassicLayout(props) {
             showPSKReporter={mapLayers.showPSKReporter}
             wsjtxSpots={wsjtxMapSpots}
             showWSJTX={mapLayers.showWSJTX}
+            showDXNews={mapLayers.showDXNews}
             onToggleSatellites={toggleSatellites}
             hoveredSpot={hoveredSpot}
             callsign={config.callsign}
@@ -514,6 +515,7 @@ export default function ClassicLayout(props) {
             showPSKReporter={mapLayers.showPSKReporter}
             wsjtxSpots={wsjtxMapSpots}
             showWSJTX={mapLayers.showWSJTX}
+            showDXNews={mapLayers.showDXNews}
             onToggleSatellites={toggleSatellites}
             hoveredSpot={hoveredSpot}
             hideOverlays={true}
@@ -662,6 +664,7 @@ export default function ClassicLayout(props) {
           </div>
 
           {/* DX News - sidebar footer */}
+          {mapLayers.showDXNews && (
           <div style={{
             flexShrink: 0,
             borderTop: '1px solid var(--border-color)',
@@ -672,6 +675,7 @@ export default function ClassicLayout(props) {
           }}>
             <DXNewsTicker sidebar={true} />
           </div>
+          )}
         </div>
       </div>
     </div>
@@ -884,6 +888,7 @@ export default function ClassicLayout(props) {
             showPSKReporter={mapLayers.showPSKReporter}
             wsjtxSpots={wsjtxMapSpots}
             showWSJTX={mapLayers.showWSJTX}
+            showDXNews={mapLayers.showDXNews}
             onToggleSatellites={toggleSatellites}
             hoveredSpot={hoveredSpot}
             hideOverlays={true}
@@ -1002,6 +1007,7 @@ export default function ClassicLayout(props) {
           </div>
 
           {/* DX News - sidebar footer */}
+          {mapLayers.showDXNews && (
           <div style={{
             flexShrink: 0,
             borderTop: '1px solid var(--border-color)',
@@ -1012,6 +1018,7 @@ export default function ClassicLayout(props) {
           }}>
             <DXNewsTicker sidebar={true} />
           </div>
+          )}
         </div>
       </div>
     </div>

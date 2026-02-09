@@ -111,7 +111,8 @@ const App = () => {
     togglePOTA,
     toggleSatellites,
     togglePSKReporter,
-    toggleWSJTX
+    toggleWSJTX,
+    toggleDXNews
   } = useMapLayers();
 
   const {
@@ -268,6 +269,7 @@ const App = () => {
     toggleSatellites,
     togglePSKReporter,
     toggleWSJTX,
+    toggleDXNews,
     hoveredSpot,
     setHoveredSpot,
     filteredSatellites,
@@ -310,6 +312,8 @@ const App = () => {
         satellites={satellites.data}
         satelliteFilters={satelliteFilters}
         onSatelliteFiltersChange={setSatelliteFilters}
+        mapLayers={mapLayers}
+        onToggleDXNews={toggleDXNews}
       />
       <DXFilterManager
         filters={dxFilters}
