@@ -1711,6 +1711,47 @@ export const SettingsPanel = ({ isOpen, onClose, config, onSave, onResetLayout, 
               )}
             </div>
 
+            {/* Open-Meteo API Key (optional) */}
+            <div style={{
+              padding: '12px',
+              background: 'var(--bg-tertiary)',
+              borderRadius: '8px',
+              border: '1px solid var(--border-color)',
+              marginBottom: '12px'
+            }}>
+              <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--accent-amber)', marginBottom: '8px' }}>
+                🌡️ Open-Meteo API Key <span style={{ color: 'var(--text-muted)', fontWeight: '400', fontSize: '11px' }}>(optional)</span>
+              </div>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px', lineHeight: 1.4 }}>
+                International weather uses Open-Meteo's free API. For higher rate limits or commercial use,
+                enter your API key from <a href="https://open-meteo.com/en/pricing" target="_blank" rel="noopener" style={{ color: 'var(--accent-blue)' }}>open-meteo.com</a>.
+                Leave blank for the free tier.
+              </div>
+              <input
+                type="text"
+                placeholder="Free tier (no key needed)"
+                defaultValue={(() => { try { return localStorage.getItem('ohc_openmeteo_apikey') || ''; } catch { return ''; } })()}
+                onChange={(e) => {
+                  try {
+                    const val = e.target.value.trim();
+                    if (val) { localStorage.setItem('ohc_openmeteo_apikey', val); }
+                    else { localStorage.removeItem('ohc_openmeteo_apikey'); }
+                  } catch {}
+                }}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  background: 'var(--bg-primary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  color: 'var(--text-primary)',
+                  fontSize: '12px',
+                  fontFamily: 'JetBrains Mono, monospace',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+
             {/* Import / Export section */}
             <div style={{
               padding: '12px',
