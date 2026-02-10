@@ -187,7 +187,14 @@ const App = () => {
   }, [pskReporter.txReports, pskReporter.rxReports, pskFilters]);
 
   const wsjtxMapSpots = useMemo(() => {
-    return wsjtx.decodes.filter(d => d.lat && d.lon && d.type === 'CQ');
+    // Apply same age filter as panel (stored in localStorage)
+    let ageMinutes = 30;
+    try { ageMinutes = parseInt(localStorage.getItem('ohc_wsjtx_age')) || 30; } catch {}
+    const ageCutoff = Date.now() - ageMinutes * 60 * 1000;
+    
+    // Map all decodes with resolved coordinates (CQ, QSO exchanges, prefix estimates)
+    // WorldMap deduplicates by callsign, keeping most recent
+    return wsjtx.decodes.filter(d => d.lat && d.lon && d.timestamp >= ageCutoff);
   }, [wsjtx.decodes]);
 
   // Map hover

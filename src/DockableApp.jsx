@@ -68,6 +68,7 @@ export const DockableApp = ({
   dxpeditions,
   contests,
   satellites,
+  filteredSatellites,
   pskReporter,
   wsjtx,
   filteredPskSpots,
@@ -280,7 +281,7 @@ export const DockableApp = ({
         mySpots={mySpots.data}
         dxPaths={dxClusterData.paths}
         dxFilters={dxFilters}
-        satellites={satellites.data}
+        satellites={filteredSatellites}
         pskReporterSpots={filteredPskSpots}
         showDXPaths={mapLayers.showDXPaths}
         showDXLabels={mapLayers.showDXLabels}
@@ -466,7 +467,7 @@ export const DockableApp = ({
   }, [
     config, deGrid, dxGrid, dxLocation, deSunTimes, dxSunTimes, showDxWeather, tempUnit, localWeather, dxWeather, solarIndices,
     propagation, bandConditions, dxClusterData, dxFilters, hoveredSpot, mapLayers, potaSpots,
-    mySpots, satellites, filteredPskSpots, wsjtxMapSpots, dxpeditions, contests,
+    mySpots, satellites, filteredSatellites, filteredPskSpots, wsjtxMapSpots, dxpeditions, contests,
     pskFilters, wsjtx, handleDXChange, setDxFilters, setShowDXFilters, setShowPSKFilters,
     setHoveredSpot, toggleDXPaths, toggleDXLabels, togglePOTA, toggleSatellites, togglePSKReporter, toggleWSJTX,
     dxLocked, handleToggleDxLock, panelZoom

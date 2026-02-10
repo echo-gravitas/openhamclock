@@ -1,14 +1,14 @@
 /**
  * usePSKReporter Hook
- * Fetches PSKReporter data via HTTP backfill + Server-Sent Events (SSE) for real-time updates.
+ * Fetches PSKReporter data via Server-Sent Events (SSE) for real-time updates.
  *
  * The server maintains a single MQTT connection to mqtt.pskreporter.info and
- * relays spots to clients via SSE, batched every 10 seconds. This avoids each
- * browser opening its own MQTT connection to PSKReporter's broker.
+ * relays spots to clients via SSE, batched every 10 seconds.
  *
  * On connect:
- *   1. Opens SSE stream to /api/pskreporter/stream/:callsign (receives recent spots + live feed)
- *   2. Fetches historical spots via /api/pskreporter/http/:callsign for backfill
+ *   1. Opens SSE stream to /api/pskreporter/stream/:callsign
+ *   2. Receives recent spots (up to 500) in the initial 'connected' event
+ *   3. Receives batched live spots every 10 seconds via default message events
  *
  * Spot format (from server):
  *   sender, senderGrid, receiver, receiverGrid
@@ -51,7 +51,6 @@ export const usePSKReporter = (callsign, options = {}) => {
   const txReportsRef = useRef([]);
   const rxReportsRef = useRef([]);
   const mountedRef = useRef(true);
-  const httpLoadedRef = useRef(false);
   const eventSourceRef = useRef(null);
 
   // Clean old spots
@@ -98,61 +97,6 @@ export const usePSKReporter = (callsign, options = {}) => {
     }
   }, [callsign, minutes, maxSpots, cleanOldSpots]);
 
-  // Fetch historical spots via HTTP API
-  const fetchHistorical = useCallback(async (upperCallsign) => {
-    if (!mountedRef.current || httpLoadedRef.current) return;
-
-    try {
-      console.log(`[PSKReporter HTTP] Fetching historical spots for ${upperCallsign}...`);
-
-      const [txRes, rxRes] = await Promise.allSettled([
-        fetch(`/api/pskreporter/http/${encodeURIComponent(upperCallsign)}?minutes=${minutes}&direction=tx`),
-        fetch(`/api/pskreporter/http/${encodeURIComponent(upperCallsign)}?minutes=${minutes}&direction=rx`)
-      ]);
-
-      let txCount = 0, rxCount = 0;
-
-      if (txRes.status === 'fulfilled' && txRes.value.ok) {
-        const data = await txRes.value.json();
-        if (data.reports?.length > 0 && mountedRef.current) {
-          const now = Date.now();
-          const reports = data.reports.map(r => ({
-            ...r,
-            direction: 'tx',
-            age: r.timestamp ? Math.floor((now - r.timestamp) / 60000) : 0
-          }));
-          txReportsRef.current = deduplicateSpots([...reports, ...txReportsRef.current], maxSpots);
-          setTxReports(cleanOldSpots([...txReportsRef.current], minutes));
-          txCount = reports.length;
-        }
-      }
-
-      if (rxRes.status === 'fulfilled' && rxRes.value.ok) {
-        const data = await rxRes.value.json();
-        if (data.reports?.length > 0 && mountedRef.current) {
-          const now = Date.now();
-          const reports = data.reports.map(r => ({
-            ...r,
-            direction: 'rx',
-            age: r.timestamp ? Math.floor((now - r.timestamp) / 60000) : 0
-          }));
-          rxReportsRef.current = deduplicateSpots([...reports, ...rxReportsRef.current], maxSpots);
-          setRxReports(cleanOldSpots([...rxReportsRef.current], minutes));
-          rxCount = reports.length;
-        }
-      }
-
-      if (txCount > 0 || rxCount > 0) {
-        console.log(`[PSKReporter HTTP] Loaded ${txCount} TX + ${rxCount} RX historical spots`);
-        setLastUpdate(new Date());
-      }
-
-      httpLoadedRef.current = true;
-    } catch (err) {
-      console.warn('[PSKReporter HTTP] Historical fetch failed:', err.message);
-    }
-  }, [minutes, maxSpots, cleanOldSpots]);
-
   // Connect to SSE stream
   useEffect(() => {
     mountedRef.current = true;
@@ -171,7 +115,6 @@ export const usePSKReporter = (callsign, options = {}) => {
     // Clear old data on reconnect
     txReportsRef.current = [];
     rxReportsRef.current = [];
-    httpLoadedRef.current = false;
     setTxReports([]);
     setRxReports([]);
     setLoading(true);
@@ -199,9 +142,6 @@ export const usePSKReporter = (callsign, options = {}) => {
         if (data.recentSpots?.length > 0) {
           processSpots(data.recentSpots);
         }
-
-        // Fetch historical backfill
-        fetchHistorical(upperCallsign);
       } catch (err) {
         console.warn('[PSKReporter SSE] Error parsing connected event:', err.message);
       }
@@ -239,7 +179,7 @@ export const usePSKReporter = (callsign, options = {}) => {
         es.close();
       }
     };
-  }, [callsign, enabled, reconnectKey, processSpots, fetchHistorical]);
+  }, [callsign, enabled, reconnectKey, processSpots]);
 
   // Periodically clean old spots and update ages
   useEffect(() => {
@@ -272,7 +212,6 @@ export const usePSKReporter = (callsign, options = {}) => {
       eventSourceRef.current = null;
     }
 
-    httpLoadedRef.current = false;
     setConnected(false);
     setLoading(true);
     setSource('reconnecting');

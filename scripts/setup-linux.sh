@@ -77,7 +77,7 @@ setup_repo() {
     git config core.fileMode false 2>/dev/null
     
     # Install dependencies
-    npm install
+    npm install --include=dev
     
     echo -e "${GREEN}✓ Installation complete${NC}"
 }

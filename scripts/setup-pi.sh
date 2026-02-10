@@ -148,7 +148,7 @@ setup_repository() {
     git config core.fileMode false 2>/dev/null
     
     # Install npm dependencies
-    npm install
+    npm install --include=dev
     
     # Build frontend for production
     npm run build

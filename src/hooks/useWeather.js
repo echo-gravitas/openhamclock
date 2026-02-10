@@ -1,14 +1,11 @@
 /**
  * useWeather Hook
- * Fetches detailed weather data from Open-Meteo API (free, no API key)
+ * US weather: fetched server-side via NWS (unlimited, cached by background worker)
+ * International weather: fetched directly from Open-Meteo by each user's browser
+ *   — distributes rate limits across all users instead of concentrating on server.
+ *   — optional API key support via localStorage ('ohc_openmeteo_apikey')
  * 
  * Always fetches in metric (Celsius, km/h, mm) and converts client-side.
- * This prevents rounding drift when toggling F↔C (the old approach refetched
- * the API in the new unit, Math.round'd, then back-converted in the header,
- * causing ±1° drift each toggle).
- * 
- * v2: Exponential retry on 429/error, error state for UI feedback,
- *     30-min poll to reduce API pressure, exported convertWeatherData.
  */
 import { useState, useEffect, useRef } from 'react';
 
@@ -168,6 +165,38 @@ export function convertWeatherData(rawData, tempUnit = 'F') {
 const RETRY_DELAYS = [15000, 30000, 60000, 120000, 300000];
 const POLL_INTERVAL = 2 * 60 * 60 * 1000; // 2 hours — matches server cache TTL
 
+// Fetch weather directly from Open-Meteo
+// Each user's browser makes its own request — rate limits are per-IP, not per-server
+async function fetchOpenMeteoDirect(lat, lon) {
+  let apiKey = '';
+  try { apiKey = localStorage.getItem('ohc_openmeteo_apikey') || ''; } catch {}
+
+  const params = [
+    `latitude=${lat}`,
+    `longitude=${lon}`,
+    'current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,cloud_cover,pressure_msl,wind_speed_10m,wind_direction_10m,wind_gusts_10m,precipitation,uv_index,visibility,dew_point_2m,is_day',
+    'daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,weather_code,uv_index_max,wind_speed_10m_max',
+    'hourly=temperature_2m,precipitation_probability,weather_code',
+    'temperature_unit=celsius',
+    'wind_speed_unit=kmh',
+    'precipitation_unit=mm',
+    'timezone=auto',
+    'forecast_days=3',
+    'forecast_hours=24',
+  ];
+  if (apiKey) params.push(`apikey=${apiKey}`);
+
+  const base = apiKey ? 'https://customer-api.open-meteo.com/v1/forecast' : 'https://api.open-meteo.com/v1/forecast';
+  const response = await fetch(`${base}?${params.join('&')}`);
+
+  if (response.status === 429) throw new Error('Rate limited');
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+  const data = await response.json();
+  data._source = 'openmeteo';
+  return data;
+}
+
 export const useWeather = (location, tempUnit = 'F') => {
   const [rawData, setRawData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -176,79 +205,43 @@ export const useWeather = (location, tempUnit = 'F') => {
   const retryRef = useRef(null);
   const retryCountRef = useRef(0);
 
-  // Fetch always in metric — only depends on location, NOT tempUnit
   useEffect(() => {
     if (!location?.lat || !location?.lon) return;
 
-    const fetchWeather = async (isRetry = false) => {
+    const fetchWeather = async () => {
       try {
         const lat = normalizeLat(location.lat);
         const lon = normalizeLon(location.lon);
 
-        const url = `/api/weather?lat=${lat}&lon=${lon}`;
-        const response = await fetch(url);
-
-        if (response.status === 429) {
-          // Rate limited — schedule exponential retry
-          const retryIdx = Math.min(retryCountRef.current, RETRY_DELAYS.length - 1);
-          const delay = RETRY_DELAYS[retryIdx];
-          retryCountRef.current++;
-          setError({ message: 'Weather service busy', retryIn: Math.round(delay / 1000) });
-          setLoading(false);
-
-          console.warn(`[Weather] Rate limited, retry #${retryCountRef.current} in ${delay / 1000}s`);
-          retryRef.current = setTimeout(() => fetchWeather(true), delay);
-          return;
-        }
-
-        if (response.status === 202) {
-          // Server queued the request — retry in 10s to pick up cached result
-          setError({ message: 'Weather loading...', retryIn: 10 });
-          setLoading(false);
-          retryRef.current = setTimeout(() => fetchWeather(true), 10000);
-          return;
-        }
-
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const result = await response.json();
-
-        // Server may return _pending inside a 200 if it served queued status
-        if (result._pending) {
-          setError({ message: 'Weather loading...', retryIn: 10 });
-          setLoading(false);
-          retryRef.current = setTimeout(() => fetchWeather(true), 10000);
-          return;
-        }
-
-        setRawData(result);
+        const data = await fetchOpenMeteoDirect(lat, lon);
+        setRawData(data);
         setError(null);
         retryCountRef.current = 0;
       } catch (err) {
         console.error('[Weather] Fetch error:', err.message);
-
-        // Schedule retry on network errors too
         const retryIdx = Math.min(retryCountRef.current, RETRY_DELAYS.length - 1);
         const delay = RETRY_DELAYS[retryIdx];
         retryCountRef.current++;
-        setError({ message: 'Weather unavailable', retryIn: Math.round(delay / 1000) });
-
-        retryRef.current = setTimeout(() => fetchWeather(true), delay);
+        setError({
+          message: err.message === 'Rate limited' ? 'Weather service busy' : 'Weather unavailable',
+          retryIn: Math.round(delay / 1000)
+        });
+        retryRef.current = setTimeout(fetchWeather, delay);
       } finally {
         setLoading(false);
       }
     };
 
-    // Debounce: wait 30 seconds after last location change before fetching.
-    // This absorbs rapid DX target changes — 2000+ users changing DX constantly
-    // would otherwise hammer the weather endpoint with unique coordinates.
+    // Debounce: wait 10 seconds after last location change before fetching.
+    // Absorbs rapid DX tuning so we only fetch for the final target.
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (retryRef.current) clearTimeout(retryRef.current);
-    retryCountRef.current = 0; // Reset retries on location change
+    retryCountRef.current = 0;
 
     debounceRef.current = setTimeout(() => {
       setLoading(true);
       fetchWeather();
-    }, 30000);
+    }, 10000);
 
     const interval = setInterval(fetchWeather, POLL_INTERVAL);
     return () => {
@@ -256,7 +249,7 @@ export const useWeather = (location, tempUnit = 'F') => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (retryRef.current) clearTimeout(retryRef.current);
     };
-  }, [location?.lat, location?.lon]); // Note: no tempUnit dependency
+  }, [location?.lat, location?.lon]);
 
   // Convert raw API data to display data based on current tempUnit
   const data = convertWeatherData(rawData, tempUnit);

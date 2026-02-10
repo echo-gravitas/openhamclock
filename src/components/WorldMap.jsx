@@ -74,6 +74,20 @@ export const WorldMap = ({
     return calculateGridSquare(deLocation.lat, deLocation.lon);
   }, [deLocation?.lat, deLocation?.lon]);
 
+  // Expose DE location to window for plugins (e.g., RBN)
+  useEffect(() => {
+    if (deLocation?.lat && deLocation?.lon) {
+      window.deLocation = {
+        lat: deLocation.lat,
+        lon: deLocation.lon
+      };
+    }
+    return () => {
+      // Cleanup on unmount
+      delete window.deLocation;
+    };
+  }, [deLocation?.lat, deLocation?.lon]);
+
   // Keep dxLockedRef in sync with prop
   useEffect(() => {
     dxLockedRef.current = dxLocked;
@@ -764,6 +778,7 @@ export const WorldMap = ({
 
     if (showWSJTX && wsjtxSpots && wsjtxSpots.length > 0 && hasValidDE) {
       // Deduplicate by callsign - keep most recent
+      // For CQ: caller is the station. For QSO: dxCall is the remote station.
       const seen = new Map();
       wsjtxSpots.forEach(spot => {
         const call = spot.caller || spot.dxCall || '';
@@ -779,9 +794,11 @@ export const WorldMap = ({
         if (!isNaN(spotLat) && !isNaN(spotLon)) {
           const freqMHz = spot.dialFrequency ? (spot.dialFrequency / 1000000) : 0;
           const bandColor = freqMHz ? getBandColor(freqMHz) : '#a78bfa';
+          // Prefix-estimated locations get reduced opacity
+          const isEstimated = spot.gridSource === 'prefix';
 
           try {
-            // Draw line from DE to CQ caller
+            // Draw line from DE to decoded station
             const points = getGreatCirclePoints(
               deLocation.lat, deLocation.lon,
               spotLat, spotLon,
@@ -793,7 +810,7 @@ export const WorldMap = ({
               const line = L.polyline(points, {
                 color: '#a78bfa',
                 weight: 1.5,
-                opacity: 0.4,
+                opacity: isEstimated ? 0.15 : 0.4,
                 dashArray: '2, 6'
               }).addTo(map);
               wsjtxMarkersRef.current.push(line);
@@ -810,16 +827,16 @@ export const WorldMap = ({
                 html: `<div style="
                   width: 8px; height: 8px;
                   background: ${bandColor};
-                  border: 1px solid #fff;
+                  border: 1px solid ${isEstimated ? '#888' : '#fff'};
                   transform: rotate(45deg);
-                  opacity: 0.9;
+                  opacity: ${isEstimated ? 0.5 : 0.9};
                 "></div>`,
                 iconSize: [8, 8],
                 iconAnchor: [4, 4]
               })
             }).bindPopup(`
-              <b>${call}</b> CQ<br>
-              ${spot.grid || ''} ${spot.band || ''}<br>
+              <b>${call}</b> ${spot.type === 'CQ' ? 'CQ' : ''}<br>
+              ${spot.grid || ''} ${spot.band || ''}${spot.gridSource === 'prefix' ? ' <i>(est)</i>' : spot.gridSource === 'cache' ? ' <i>(prev)</i>' : ''}<br>
               ${spot.mode || ''} SNR: ${spot.snr != null ? (spot.snr >= 0 ? '+' : '') + spot.snr : '?'} dB
             `).addTo(map);
             wsjtxMarkersRef.current.push(diamond);

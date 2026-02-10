@@ -98,7 +98,7 @@ class UpstreamManager {
 
   /**
    * Record a failure — applies exponential backoff with jitter
-   * @param {string} service - Service name (e.g. 'pskreporter', 'wspr', 'weather')
+   * @param {string} service - Service name (e.g. 'pskreporter')
    * @param {number} statusCode - HTTP status that caused the failure
    */
   recordFailure(service, statusCode) {
@@ -108,8 +108,11 @@ class UpstreamManager {
     // Base delays by status: 429=aggressive, 503=moderate, other=short
     const baseDelay = statusCode === 429 ? 60000 : statusCode === 503 ? 30000 : 15000;
     
-    // Exponential: 30s, 60s, 120s, 240s... capped at 30 minutes
-    const delay = Math.min(30 * 60 * 1000, baseDelay * Math.pow(2, consecutive - 1));
+    // Per-service max backoff caps
+    const maxBackoff = 30 * 60 * 1000; // 30 minutes
+    
+    // Exponential: base * 2^(n-1), capped per service
+    const delay = Math.min(maxBackoff, baseDelay * Math.pow(2, Math.min(consecutive - 1, 8)));
     
     // Add 0-15s jitter to prevent synchronized retries across instances
     const jitter = Math.random() * 15000;
@@ -334,6 +337,8 @@ app.use(compression({
   level: 6, // Balanced compression level (1-9)
   threshold: 1024, // Only compress responses > 1KB
   filter: (req, res) => {
+    // Never compress SSE streams — compression buffers prevent events from flushing
+    if (req.headers['accept'] === 'text/event-stream') return false;
     // Compress everything except already-compressed formats
     if (req.headers['x-no-compression']) return false;
     return compression.filter(req, res);
@@ -343,6 +348,11 @@ app.use(compression({
 // API response caching middleware
 // Sets Cache-Control headers based on endpoint to reduce client polling
 app.use('/api', (req, res, next) => {
+  // Never set cache headers on SSE streams
+  if (req.path.includes('/stream/')) {
+    return next();
+  }
+  
   // Determine cache duration based on endpoint
   let cacheDuration = 30; // Default: 30 seconds
   
@@ -3571,185 +3581,23 @@ app.get('/api/pskreporter/config', (req, res) => {
   });
 });
 
-// Fallback HTTP endpoint for when MQTT isn't available
-// Uses the traditional retrieve API with caching
-let pskHttpCache = {};
-const PSK_HTTP_CACHE_TTL = 10 * 60 * 1000; // 10 minutes - PSKReporter rate limits aggressively
-const PSK_HTTP_STALE_TTL = 60 * 60 * 1000; // Serve stale data up to 1 hour
-
-app.get('/api/pskreporter/http/:callsign', async (req, res) => {
-  const callsign = req.params.callsign.toUpperCase();
-  const minutes = parseInt(req.query.minutes) || 30;
-  const direction = req.query.direction || 'tx'; // tx or rx
-  const flowStartSeconds = -Math.abs(minutes * 60);
-  
-  const cacheKey = `psk:${direction}:${callsign}:${minutes}`;
-  const now = Date.now();
-  
-  // 1. Fresh cache hit — serve immediately
-  if (pskHttpCache[cacheKey] && (now - pskHttpCache[cacheKey].timestamp) < PSK_HTTP_CACHE_TTL) {
-    return res.json({ ...pskHttpCache[cacheKey].data, cached: true });
-  }
-  
-  // 2. Backoff active — serve stale or empty
-  if (upstream.isBackedOff('pskreporter')) {
-    if (pskHttpCache[cacheKey]) {
-      return res.json({ ...pskHttpCache[cacheKey].data, cached: true, stale: true });
-    }
-    return res.json({ callsign, direction, count: 0, reports: [], backoff: true });
-  }
-  
-  // 3. Stale cache exists — serve it immediately, refresh in background (stale-while-revalidate)
-  const hasStale = pskHttpCache[cacheKey] && (now - pskHttpCache[cacheKey].timestamp) < PSK_HTTP_STALE_TTL;
-  
-  // 4. Deduplicated upstream fetch — only 1 in-flight request per cache key
-  const doFetch = () => upstream.fetch(cacheKey, async () => {
-    const param = direction === 'tx' ? 'senderCallsign' : 'receiverCallsign';
-    const url = `https://retrieve.pskreporter.info/query?${param}=${encodeURIComponent(callsign)}&flowStartSeconds=${flowStartSeconds}&rronly=1&appcontact=openhamclock`;
-    
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000);
-    
-    const response = await fetch(url, {
-      headers: { 
-        'User-Agent': 'OpenHamClock/15.1.4 (Amateur Radio Dashboard)',
-        'Accept': '*/*'
-      },
-      signal: controller.signal
-    });
-    clearTimeout(timeout);
-    
-    if (!response.ok) {
-      const backoffSecs = upstream.recordFailure('pskreporter', response.status);
-      logErrorOnce('PSKReporter HTTP', `${response.status} — backing off for ${backoffSecs}s`);
-      throw new Error(`HTTP ${response.status}`);
-    }
-    
-    const xml = await response.text();
-    const reports = [];
-    
-    const reportRegex = /<receptionReport[^>]*>/g;
-    let match;
-    while ((match = reportRegex.exec(xml)) !== null) {
-      const report = match[0];
-      const getAttr = (name) => {
-        const m = report.match(new RegExp(`${name}="([^"]*)"`));
-        return m ? m[1] : null;
-      };
-      
-      const receiverCallsign = getAttr('receiverCallsign');
-      const receiverLocator = getAttr('receiverLocator');
-      const senderCallsign = getAttr('senderCallsign');
-      const senderLocator = getAttr('senderLocator');
-      const frequency = getAttr('frequency');
-      const mode = getAttr('mode');
-      const flowStartSecs = getAttr('flowStartSeconds');
-      const sNR = getAttr('sNR');
-      
-      if (receiverCallsign && senderCallsign) {
-        const locator = direction === 'tx' ? receiverLocator : senderLocator;
-        const loc = locator ? gridToLatLonSimple(locator) : null;
-        
-        reports.push({
-          sender: senderCallsign,
-          senderGrid: senderLocator,
-          receiver: receiverCallsign,
-          receiverGrid: receiverLocator,
-          freq: frequency ? parseInt(frequency) : null,
-          freqMHz: frequency ? (parseInt(frequency) / 1000000).toFixed(3) : null,
-          band: frequency ? getBandFromHz(parseInt(frequency)) : 'Unknown',
-          mode: mode || 'Unknown',
-          timestamp: flowStartSecs ? parseInt(flowStartSecs) * 1000 : Date.now(),
-          snr: sNR ? parseInt(sNR) : null,
-          lat: loc?.lat,
-          lon: loc?.lon,
-          age: flowStartSecs ? Math.floor((Date.now() / 1000 - parseInt(flowStartSecs)) / 60) : 0
-        });
-      }
-    }
-    
-    reports.sort((a, b) => b.timestamp - a.timestamp);
-    upstream.recordSuccess('pskreporter');
-    
-    const result = {
-      callsign,
-      direction,
-      count: reports.length,
-      reports: reports.slice(0, 500),
-      timestamp: new Date().toISOString(),
-      source: 'http'
-    };
-    
-    pskHttpCache[cacheKey] = { data: result, timestamp: Date.now() };
-    logDebug(`[PSKReporter HTTP] Found ${reports.length} ${direction} reports for ${callsign}`);
-    return result;
-  });
-  
-  if (hasStale) {
-    // Stale-while-revalidate: respond with stale data now, refresh in background
-    doFetch().catch(() => {}); // fire-and-forget background refresh
-    return res.json({ ...pskHttpCache[cacheKey].data, cached: true, stale: true });
-  }
-  
-  // No stale data — must wait for upstream
-  try {
-    const result = await doFetch();
-    res.json(result);
-  } catch (error) {
-    if (!error.message?.includes('HTTP 403') && !error.message?.includes('HTTP 503')) {
-      logErrorOnce('PSKReporter HTTP', error.message);
-    }
-    if (pskHttpCache[cacheKey]) {
-      return res.json({ ...pskHttpCache[cacheKey].data, cached: true, stale: true });
-    }
-    res.json({ callsign, direction, count: 0, reports: [] });
-  }
-});
-
-// Combined endpoint that returns HTTP-fetched data + stream info
+// Combined endpoint - returns stream info (live spots via SSE, no HTTP backfill)
 app.get('/api/pskreporter/:callsign', async (req, res) => {
   const callsign = req.params.callsign.toUpperCase();
-  const minutes = parseInt(req.query.minutes) || 30;
   
-  // For now, redirect to HTTP endpoint for historical data
-  // Live spots come via /api/pskreporter/stream/:callsign (SSE)
-  try {
-    const [txRes, rxRes] = await Promise.allSettled([
-      fetch(`http://localhost:${PORT}/api/pskreporter/http/${callsign}?minutes=${minutes}&direction=tx`),
-      fetch(`http://localhost:${PORT}/api/pskreporter/http/${callsign}?minutes=${minutes}&direction=rx`)
-    ]);
-    
-    let txData = { count: 0, reports: [] };
-    let rxData = { count: 0, reports: [] };
-    
-    if (txRes.status === 'fulfilled' && txRes.value.ok) {
-      txData = await txRes.value.json();
+  res.json({
+    callsign,
+    stream: {
+      endpoint: `/api/pskreporter/stream/${callsign}`,
+      type: 'text/event-stream',
+      hint: 'Connect to SSE stream for real-time spots. Initial spots delivered on connect event.'
+    },
+    mqtt: {
+      status: pskMqtt.connected ? 'connected' : 'disconnected',
+      activeCallsigns: pskMqtt.subscribedCalls.size,
+      sseClients: Array.from(pskMqtt.subscribers.values()).reduce((s, c) => s + c.size, 0)
     }
-    if (rxRes.status === 'fulfilled' && rxRes.value.ok) {
-      rxData = await rxRes.value.json();
-    }
-    
-    res.json({
-      callsign,
-      tx: txData,
-      rx: rxData,
-      timestamp: new Date().toISOString(),
-      stream: {
-        endpoint: `/api/pskreporter/stream/${callsign}`,
-        type: 'text/event-stream',
-        hint: 'Connect to SSE stream for real-time spots'
-      }
-    });
-    
-  } catch (error) {
-    logErrorOnce('PSKReporter', error.message);
-    res.json({ 
-      callsign, 
-      tx: { count: 0, reports: [] }, 
-      rx: { count: 0, reports: [] }, 
-      error: error.message 
-    });
-  }
+  });
 });
 
 // ============================================
@@ -3797,13 +3645,27 @@ function pskMqttConnect() {
   pskMqtt.client = client;
 
   client.on('connect', () => {
-    console.log(`[PSK-MQTT] Connected! Re-subscribing ${pskMqtt.subscribedCalls.size} callsigns...`);
     pskMqtt.connected = true;
     pskMqtt.reconnectAttempts = 0;
 
-    // Re-subscribe all active callsigns after reconnect
-    for (const call of pskMqtt.subscribedCalls) {
-      subscribeCallsign(call);
+    const count = pskMqtt.subscribedCalls.size;
+    if (count > 0) {
+      console.log(`[PSK-MQTT] Connected — subscribing ${count} callsigns`);
+      // Batch all topic subscriptions into a single subscribe call
+      const topics = [];
+      for (const call of pskMqtt.subscribedCalls) {
+        topics.push(`pskr/filter/v2/+/+/${call}/#`);
+        topics.push(`pskr/filter/v2/+/+/+/${call}/#`);
+      }
+      pskMqtt.client.subscribe(topics, { qos: 0 }, (err) => {
+        if (err) {
+          console.error(`[PSK-MQTT] Batch subscribe error:`, err.message);
+        } else {
+          console.log(`[PSK-MQTT] Subscribed ${count} callsigns (${topics.length} topics)`);
+        }
+      });
+    } else {
+      console.log('[PSK-MQTT] Connected (no active callsigns)');
     }
   });
 
@@ -3898,9 +3760,10 @@ function subscribeCallsign(call) {
   const rxTopic = `pskr/filter/v2/+/+/+/${call}/#`;
   pskMqtt.client.subscribe([txTopic, rxTopic], { qos: 0 }, (err) => {
     if (err) {
+      // "Connection closed" errors are expected during reconnects — 
+      // the on('connect') handler will re-subscribe all active callsigns
+      if (err.message && err.message.includes('onnection closed')) return;
       console.error(`[PSK-MQTT] Subscribe error for ${call}:`, err.message);
-    } else {
-      console.log(`[PSK-MQTT] Subscribed: ${call} (TX + RX)`);
     }
   });
 }
@@ -3911,9 +3774,8 @@ function unsubscribeCallsign(call) {
   const rxTopic = `pskr/filter/v2/+/+/+/${call}/#`;
   pskMqtt.client.unsubscribe([txTopic, rxTopic], (err) => {
     if (err) {
+      if (err.message && err.message.includes('onnection closed')) return;
       console.error(`[PSK-MQTT] Unsubscribe error for ${call}:`, err.message);
-    } else {
-      console.log(`[PSK-MQTT] Unsubscribed: ${call}`);
     }
   });
 }
@@ -3931,6 +3793,7 @@ pskMqtt.flushInterval = setInterval(() => {
     for (const res of clients) {
       try {
         res.write(message);
+        if (typeof res.flush === 'function') res.flush();
         pskMqtt.stats.spotsRelayed += buffer.length;
       } catch {
         // Client disconnected — will be cleaned up
@@ -3974,12 +3837,13 @@ app.get('/api/pskreporter/stream/:callsign', (req, res) => {
     return res.status(400).json({ error: 'Valid callsign required' });
   }
 
-  // Set up SSE
+  // Set up SSE — disable any buffering
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
+    'Cache-Control': 'no-cache, no-transform',
     'Connection': 'keep-alive',
-    'X-Accel-Buffering': 'no'
+    'X-Accel-Buffering': 'no',
+    'Content-Encoding': 'identity'
   });
   res.flushHeaders();
 
@@ -3991,6 +3855,7 @@ app.get('/api/pskreporter/stream/:callsign', (req, res) => {
     recentSpots: recentSpots.slice(-200),
     subscriberCount: (pskMqtt.subscribers.get(callsign)?.size || 0) + 1
   })}\n\n`);
+  if (typeof res.flush === 'function') res.flush();
 
   // Register this client
   if (!pskMqtt.subscribers.has(callsign)) {
@@ -4016,6 +3881,7 @@ app.get('/api/pskreporter/stream/:callsign', (req, res) => {
   const keepalive = setInterval(() => {
     try {
       res.write(`: keepalive ${Date.now()}\n\n`);
+      if (typeof res.flush === 'function') res.flush();
     } catch {
       clearInterval(keepalive);
     }
@@ -4541,7 +4407,7 @@ app.get('/api/wspr/heatmap', async (req, res) => {
     
     const response = await fetch(url, {
       headers: { 
-        'User-Agent': 'OpenHamClock/15.1.4 (Amateur Radio Dashboard)',
+        'User-Agent': 'OpenHamClock/15.1.8 (Amateur Radio Dashboard)',
         'Accept': '*/*'
       },
       signal: controller.signal
@@ -6777,13 +6643,13 @@ function generateStatusDashboard() {
       <table>
         <thead><tr><th>Service</th><th>Status</th><th>Backoff</th><th>Consecutive Failures</th><th>In-Flight</th></tr></thead>
         <tbody>
-          ${['pskreporter', 'openmeteo'].map(svc => {
+          ${['pskreporter'].map(svc => {
             const backedOff = upstream.isBackedOff(svc);
             const remaining = upstream.backoffRemaining(svc);
             const consecutive = upstream.backoffs.get(svc)?.consecutive || 0;
             const prefix = svc === 'pskreporter' ? ['psk:', 'wspr:'] : ['weather:'];
             const inFlight = [...upstream.inFlight.keys()].filter(k => prefix.some(p => k.startsWith(p))).length;
-            const label = svc === 'pskreporter' ? 'PSKReporter (PSK + WSPR)' : 'Open-Meteo (Intl Weather)';
+            const label = 'PSKReporter (WSPR Heatmap)';
             return `<tr>
               <td>${label}</td>
               <td style="color: ${backedOff ? '#ff4444' : '#00ff88'}">${backedOff ? '⛔ Backoff' : '✅ OK'}</td>
@@ -6792,19 +6658,10 @@ function generateStatusDashboard() {
               <td>${inFlight}</td>
             </tr>`;
           }).join('')}
-          <tr>
-            <td>NWS api.weather.gov (US Weather)</td>
-            <td style="color: #00ff88">✅ No limit</td>
-            <td>—</td>
-            <td>—</td>
-            <td>${[...upstream.inFlight.keys()].filter(k => k.startsWith('weather:')).length}</td>
-          </tr>
         </tbody>
       </table>
       <p style="font-size: 11px; color: #888; margin-top: 8px">
-        Weather cache: ${weatherCache.size} entries (2h TTL) · NWS grid cache: ${nwsPointsCache.size} grids (permanent) ·
-        Total in-flight deduped: ${upstream.inFlight.size} ·
-        Open-Meteo queue: ${openMeteoQueue.queue.length} pending / ${openMeteoQueue.processed} processed / ${openMeteoQueue.dropped} dropped
+        Weather: client-direct (Open-Meteo, per-user rate limits) · In-flight deduped: ${upstream.inFlight.size}
       </p>
 
       <h2>📡 PSKReporter MQTT Proxy</h2>
@@ -6911,28 +6768,9 @@ app.get('/api/health', (req, res) => {
           consecutive: upstream.backoffs.get('pskreporter')?.consecutive || 0,
           inFlightRequests: [...upstream.inFlight.keys()].filter(k => k.startsWith('psk:') || k.startsWith('wspr:')).length
         },
-        openmeteo: {
-          status: upstream.isBackedOff('openmeteo') ? 'backoff' : 'ok',
-          backoffRemaining: upstream.backoffRemaining('openmeteo'),
-          consecutive: upstream.backoffs.get('openmeteo')?.consecutive || 0,
-          inFlightRequests: [...upstream.inFlight.keys()].filter(k => k.startsWith('weather:')).length
-        },
-        nws: {
-          status: 'ok',
-          note: 'US locations only, no rate limit',
-          gridsCached: nwsPointsCache.size
-        },
-        weatherCache: {
-          entries: weatherCache.size,
-          ttlMinutes: Math.round(WEATHER_CACHE_TTL / 60000),
-          staleTtlHours: Math.round(WEATHER_STALE_TTL / 3600000)
-        },
-        openMeteoQueue: {
-          pending: openMeteoQueue.queue.length,
-          processing: openMeteoQueue.processing,
-          processed: openMeteoQueue.processed,
-          dropped: openMeteoQueue.dropped,
-          maxPerSecond: openMeteoQueue.maxPerSecond
+        weather: {
+          status: 'client-direct',
+          note: 'All weather fetched directly by user browsers from Open-Meteo (per-user rate limits)'
         },
         totalInFlight: upstream.inFlight.size,
         pskMqttProxy: {
@@ -7028,506 +6866,15 @@ app.get('/api/config', (req, res) => {
 });
 
 // ============================================
-// WEATHER PROXY (NWS + Open-Meteo hybrid)
+// WEATHER (backward-compatible stub)
 // ============================================
-// US coordinates: NWS api.weather.gov (free, unlimited, no API key)
-// International: Open-Meteo (free, 10K/day limit)
-// All responses normalized to Open-Meteo format for the client.
-// Coordinates rounded to whole degrees (~111km grid) to maximize cache hits.
-// Weather doesn't vary meaningfully within 111km — this is the key to surviving 2000+ users.
-const weatherCache = new Map();          // key: "weather:lat,lon" → { data, timestamp, source }
-const nwsPointsCache = new Map();        // key: "lat,lon" → { gridId, gridX, gridY, stationUrl } (never expires)
-const WEATHER_CACHE_TTL = 2 * 60 * 60 * 1000;  // 2 hours
-const WEATHER_STALE_TTL = 6 * 60 * 60 * 1000;  // Serve stale data up to 6 hours if upstream is down
-const NWS_USER_AGENT = 'OpenHamClock/15.1.4 (https://openhamclock.com, Amateur Radio Dashboard)';
-
-// Rough bounding box for US coverage (CONUS + Alaska + Hawaii + territories)
-function isUSCoordinates(lat, lon) {
-  // CONUS
-  if (lat >= 24 && lat <= 50 && lon >= -125 && lon <= -66) return true;
-  // Alaska
-  if (lat >= 51 && lat <= 72 && lon >= -180 && lon <= -129) return true;
-  // Hawaii
-  if (lat >= 18 && lat <= 23 && lon >= -161 && lon <= -154) return true;
-  // Puerto Rico / US Virgin Islands
-  if (lat >= 17 && lat <= 19 && lon >= -68 && lon <= -64) return true;
-  // Guam
-  if (lat >= 13 && lat <= 14 && lon >= 144 && lon <= 145) return true;
-  return false;
-}
-
-// Map NWS text descriptions to WMO weather codes (used by client's WEATHER_CODES map)
-function nwsDescToWeatherCode(desc, isDay) {
-  if (!desc) return 0;
-  const d = desc.toLowerCase();
-  if (d.includes('thunder'))       return d.includes('hail') ? 99 : 95;
-  if (d.includes('heavy snow'))    return 75;
-  if (d.includes('snow shower'))   return d.includes('heavy') ? 86 : 85;
-  if (d.includes('snow') || d.includes('blizzard')) return d.includes('light') ? 71 : 73;
-  if (d.includes('sleet') || d.includes('freezing rain')) return 67;
-  if (d.includes('freezing drizzle')) return 57;
-  if (d.includes('heavy rain') || d.includes('violent')) return 65;
-  if (d.includes('rain shower'))   return d.includes('heavy') ? 82 : 80;
-  if (d.includes('rain'))          return d.includes('light') ? 61 : 63;
-  if (d.includes('drizzle'))       return d.includes('light') ? 51 : 53;
-  if (d.includes('fog'))           return 45;
-  if (d.includes('overcast'))      return 3;
-  if (d.includes('mostly cloudy') || d.includes('cloudy')) return 3;
-  if (d.includes('partly'))        return 2;
-  if (d.includes('mostly clear') || d.includes('mostly sunny')) return 1;
-  if (d.includes('clear') || d.includes('sunny') || d.includes('fair')) return 0;
-  return 2; // default: partly cloudy
-}
-
-// Resolve NWS grid info for a lat/lon (cached forever — grid doesn't move)
-async function resolveNWSGrid(lat, lon) {
-  const key = `${lat},${lon}`;
-  if (nwsPointsCache.has(key)) return nwsPointsCache.get(key);
-
-  const resp = await fetch(`https://api.weather.gov/points/${lat},${lon}`, {
-    headers: { 'User-Agent': NWS_USER_AGENT, Accept: 'application/geo+json' },
-    timeout: 8000,
-  });
-  if (!resp.ok) throw new Error(`NWS /points ${resp.status}`);
-  const data = await resp.json();
-  const p = data.properties;
-  if (!p?.gridId || p?.gridX == null || p?.gridY == null) {
-    throw new Error('NWS /points: missing grid data');
-  }
-
-  const gridInfo = {
-    gridId: p.gridId,
-    gridX: p.gridX,
-    gridY: p.gridY,
-    forecastUrl: p.forecast,
-    forecastHourlyUrl: p.forecastHourly,
-    stationsUrl: p.observationStations,
-    timezone: p.timeZone || 'America/New_York',
-    stationId: null, // resolved lazily below
-  };
-
-  // Resolve nearest observation station
-  try {
-    const stResp = await fetch(p.observationStations, {
-      headers: { 'User-Agent': NWS_USER_AGENT, Accept: 'application/geo+json' },
-      timeout: 8000,
-    });
-    if (stResp.ok) {
-      const stData = await stResp.json();
-      const features = stData.features || stData.observationStations;
-      if (features && features.length > 0) {
-        // features[0].properties.stationIdentifier or parse from URL
-        const stId = features[0]?.properties?.stationIdentifier
-          || features[0]?.id?.split('/stations/')[1]
-          || (typeof features[0] === 'string' ? features[0].split('/stations/')[1] : null);
-        gridInfo.stationId = stId;
-      }
-    }
-  } catch { /* non-critical — forecast still works without observations */ }
-
-  nwsPointsCache.set(key, gridInfo);
-  return gridInfo;
-}
-
-// Fetch weather from NWS and normalize to Open-Meteo format
-async function fetchNWSWeather(lat, lon) {
-  const grid = await resolveNWSGrid(lat, lon);
-
-  // Fetch observation + forecast in parallel
-  const [obsResult, forecastResult, hourlyResult] = await Promise.allSettled([
-    // Current observation from nearest station
-    grid.stationId
-      ? fetch(`https://api.weather.gov/stations/${grid.stationId}/observations/latest`, {
-          headers: { 'User-Agent': NWS_USER_AGENT, Accept: 'application/geo+json' },
-          timeout: 8000,
-        }).then(r => r.ok ? r.json() : null)
-      : Promise.resolve(null),
-    // Daily forecast (12h periods)
-    fetch(grid.forecastUrl, {
-      headers: { 'User-Agent': NWS_USER_AGENT, Accept: 'application/geo+json' },
-      timeout: 8000,
-    }).then(r => { if (!r.ok) throw new Error(`NWS forecast ${r.status}`); return r.json(); }),
-    // Hourly forecast
-    fetch(grid.forecastHourlyUrl, {
-      headers: { 'User-Agent': NWS_USER_AGENT, Accept: 'application/geo+json' },
-      timeout: 8000,
-    }).then(r => r.ok ? r.json() : null),
-  ]);
-
-  // Forecast is required
-  if (forecastResult.status === 'rejected') throw forecastResult.reason;
-  const forecast = forecastResult.value;
-  const obs = obsResult.status === 'fulfilled' ? obsResult.value : null;
-  const hourly = hourlyResult.status === 'fulfilled' ? hourlyResult.value : null;
-
-  // --- Build normalized Open-Meteo-compatible response ---
-  const o = obs?.properties || {};
-  const periods = forecast?.properties?.periods || [];
-  const hPeriods = hourly?.properties?.periods || [];
-  const nowHour = new Date().getUTCHours();
-  const isDayNow = nowHour >= 11 && nowHour < 23; // rough UTC estimate
-
-  // Current conditions from observation (values in SI: °C, m/s, Pa, m)
-  const tempC = o.temperature?.value;
-  const dewC = o.dewpoint?.value;
-  const humidity = o.relativeHumidity?.value;
-  const windSpeedMs = o.windSpeed?.value;  // m/s or km/h depending on station
-  const windDir = o.windDirection?.value;
-  const windGustMs = o.windGust?.value;
-  const pressurePa = o.barometricPressure?.value;
-  const visibilityM = o.visibility?.value;
-  const textDesc = o.textDescription || periods[0]?.shortForecast || '';
-  const weatherCode = nwsDescToWeatherCode(textDesc, periods[0]?.isDaytime ?? isDayNow);
-
-  // NWS wind is in km/h (unit: wmoUnit:km_h-1) — already correct for our format
-  // But observation windSpeed can be m/s (unitCode: wmoUnit:m_s-1) — need to check
-  let windKmh = null;
-  if (windSpeedMs != null) {
-    const windUnit = o.windSpeed?.unitCode || '';
-    windKmh = windUnit.includes('m_s') ? windSpeedMs * 3.6 : windSpeedMs;
-  }
-  let gustKmh = null;
-  if (windGustMs != null) {
-    const gustUnit = o.windGust?.unitCode || '';
-    gustKmh = gustUnit.includes('m_s') ? windGustMs * 3.6 : windGustMs;
-  }
-
-  // Apparent temperature: use heat index or wind chill from observation, or estimate
-  let apparentC = tempC;
-  if (o.heatIndex?.value != null) apparentC = o.heatIndex.value;
-  else if (o.windChill?.value != null) apparentC = o.windChill.value;
-
-  // Build daily forecast from periods (NWS gives day/night period pairs)
-  // Group periods into days and extract hi/lo
-  const dailyMap = new Map();
-  for (const p of periods) {
-    const dateStr = p.startTime?.slice(0, 10);
-    if (!dateStr) continue;
-    if (!dailyMap.has(dateStr)) {
-      dailyMap.set(dateStr, { high: null, low: null, code: null, desc: '', precipProb: 0, windMax: null });
-    }
-    const day = dailyMap.get(dateStr);
-    const pTempC = p.temperature != null
-      ? (p.temperatureUnit === 'F' ? (p.temperature - 32) * 5 / 9 : p.temperature)
-      : null;
-    if (p.isDaytime && pTempC != null) day.high = pTempC;
-    if (!p.isDaytime && pTempC != null) day.low = pTempC;
-    if (p.isDaytime && p.shortForecast) {
-      day.desc = p.shortForecast;
-      day.code = nwsDescToWeatherCode(p.shortForecast, true);
-    }
-    // Extract precip probability from detailedForecast or probabilityOfPrecipitation
-    const pop = p.probabilityOfPrecipitation?.value;
-    if (pop != null && pop > day.precipProb) day.precipProb = pop;
-    // Wind: parse "10 to 15 mph" → take max, convert to km/h
-    if (p.windSpeed) {
-      const nums = p.windSpeed.match(/\d+/g);
-      if (nums) {
-        const maxWind = Math.max(...nums.map(Number));
-        const wKmh = p.windSpeed.toLowerCase().includes('km') ? maxWind : maxWind * 1.60934;
-        if (day.windMax == null || wKmh > day.windMax) day.windMax = wKmh;
-      }
-    }
-  }
-
-  const dailyEntries = [...dailyMap.entries()].slice(0, 3);
-  const dailyTimes = dailyEntries.map(([d]) => d);
-  const dailyData = dailyEntries.map(([, v]) => v);
-
-  // Build hourly forecast (next 24h in 3h intervals)
-  const hourlyTimes = [];
-  const hourlyTemps = [];
-  const hourlyPrecipProb = [];
-  const hourlyCodes = [];
-  for (let i = 0; i < Math.min(24, hPeriods.length); i++) {
-    const hp = hPeriods[i];
-    hourlyTimes.push(hp.startTime);
-    const htC = hp.temperature != null
-      ? (hp.temperatureUnit === 'F' ? (hp.temperature - 32) * 5 / 9 : hp.temperature)
-      : null;
-    hourlyTemps.push(htC);
-    hourlyPrecipProb.push(hp.probabilityOfPrecipitation?.value || 0);
-    hourlyCodes.push(nwsDescToWeatherCode(hp.shortForecast, hp.isDaytime));
-  }
-
-  // Assemble in Open-Meteo format (all values in metric: °C, km/h, mm, hPa)
-  return {
-    _source: 'nws',
-    timezone: grid.timezone,
-    current: {
-      temperature_2m: tempC,
-      relative_humidity_2m: humidity,
-      apparent_temperature: apparentC,
-      weather_code: weatherCode,
-      cloud_cover: o.cloudLayers?.[0]?.amount ? 
-        ({ SKC: 0, FEW: 20, SCT: 40, BKN: 70, OVC: 100 }[o.cloudLayers[0].amount] || 50) : null,
-      pressure_msl: pressurePa != null ? pressurePa / 100 : null, // Pa → hPa
-      wind_speed_10m: windKmh,
-      wind_direction_10m: windDir,
-      wind_gusts_10m: gustKmh,
-      precipitation: o.precipitationLastHour?.value || 0,
-      uv_index: null, // NWS doesn't provide UV
-      visibility: visibilityM,
-      dew_point_2m: dewC,
-      is_day: periods[0]?.isDaytime ? 1 : 0,
-    },
-    daily: {
-      time: dailyTimes,
-      temperature_2m_max: dailyData.map(d => d.high),
-      temperature_2m_min: dailyData.map(d => d.low),
-      precipitation_sum: dailyData.map(() => null), // NWS forecast doesn't give precip amounts
-      precipitation_probability_max: dailyData.map(d => d.precipProb),
-      weather_code: dailyData.map(d => d.code),
-      uv_index_max: dailyData.map(() => null),
-      wind_speed_10m_max: dailyData.map(d => d.windMax),
-    },
-    hourly: {
-      time: hourlyTimes,
-      temperature_2m: hourlyTemps,
-      precipitation_probability: hourlyPrecipProb,
-      weather_code: hourlyCodes,
-    },
-  };
-}
-
-// Fetch weather from Open-Meteo (international fallback)
-// ---- Open-Meteo Throttled Queue ----
-// With 2000+ users, cache misses for different DX targets can burst hundreds of
-// unique requests at once. Open-Meteo free tier allows 600/min, 10K/day.
-// This queue processes requests at a steady drip rate to avoid hitting limits.
-const openMeteoQueue = {
-  queue: [],            // Array of { lat, lon, resolve, reject, enqueuedAt }
-  processing: false,
-  maxPerSecond: 4,      // 4 req/s = 240/min — safe margin under 600/min
-  maxQueueSize: 200,    // Drop requests if queue backs up too far
-  processed: 0,
-  dropped: 0,
-  lastProcessedAt: 0
-};
-
-function enqueueOpenMeteoRequest(lat, lon) {
-  return new Promise((resolve, reject) => {
-    if (openMeteoQueue.queue.length >= openMeteoQueue.maxQueueSize) {
-      openMeteoQueue.dropped++;
-      reject(new Error('Weather queue full — too many pending requests'));
-      return;
-    }
-    openMeteoQueue.queue.push({ lat, lon, resolve, reject, enqueuedAt: Date.now() });
-    processOpenMeteoQueue();
-  });
-}
-
-async function processOpenMeteoQueue() {
-  if (openMeteoQueue.processing || openMeteoQueue.queue.length === 0) return;
-  openMeteoQueue.processing = true;
-
-  while (openMeteoQueue.queue.length > 0) {
-    // Rate limit: wait until enough time has passed since last request
-    const now = Date.now();
-    const minInterval = 1000 / openMeteoQueue.maxPerSecond;
-    const elapsed = now - openMeteoQueue.lastProcessedAt;
-    if (elapsed < minInterval) {
-      await new Promise(r => setTimeout(r, minInterval - elapsed));
-    }
-
-    const item = openMeteoQueue.queue.shift();
-    if (!item) break;
-
-    // Drop items that have been waiting too long (60s)
-    if (Date.now() - item.enqueuedAt > 60000) {
-      openMeteoQueue.dropped++;
-      item.reject(new Error('Weather request expired in queue'));
-      continue;
-    }
-
-    openMeteoQueue.lastProcessedAt = Date.now();
-    try {
-      const result = await fetchOpenMeteoWeatherDirect(item.lat, item.lon);
-      openMeteoQueue.processed++;
-      item.resolve(result);
-    } catch (err) {
-      item.reject(err);
-      // If rate limited, pause the queue for backoff duration
-      if (err.message === 'Rate limited') {
-        const backoffMs = (upstream.backoffRemaining('openmeteo') || 30) * 1000;
-        console.log(`[Weather Queue] Open-Meteo rate limited, pausing queue for ${backoffMs / 1000}s`);
-        await new Promise(r => setTimeout(r, backoffMs));
-      }
-    }
-  }
-
-  openMeteoQueue.processing = false;
-}
-
-// The actual Open-Meteo fetch (called only from queue)
-async function fetchOpenMeteoWeatherDirect(lat, lon) {
-  const params = [
-    `latitude=${lat}`,
-    `longitude=${lon}`,
-    'current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,cloud_cover,pressure_msl,wind_speed_10m,wind_direction_10m,wind_gusts_10m,precipitation,uv_index,visibility,dew_point_2m,is_day',
-    'daily=temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,weather_code,sunrise,sunset,uv_index_max,wind_speed_10m_max',
-    'hourly=temperature_2m,precipitation_probability,weather_code',
-    'temperature_unit=celsius',
-    'wind_speed_unit=kmh',
-    'precipitation_unit=mm',
-    'timezone=auto',
-    'forecast_days=3',
-    'forecast_hours=24',
-  ].join('&');
-
-  const url = `https://api.open-meteo.com/v1/forecast?${params}`;
-  const response = await fetch(url, { timeout: 10000 });
-
-  if (response.status === 429) {
-    const backoffSecs = upstream.recordFailure('openmeteo', 429);
-    logErrorOnce('Weather', `Open-Meteo rate limited (429) — backing off for ${backoffSecs}s`);
-    throw new Error('Rate limited');
-  }
-
-  if (!response.ok) {
-    const backoffSecs = upstream.recordFailure('openmeteo', response.status);
-    logErrorOnce('Weather', `Open-Meteo returned ${response.status} — backing off for ${backoffSecs}s`);
-    throw new Error(`HTTP ${response.status}`);
-  }
-
-  const data = await response.json();
-  data._source = 'openmeteo';
-  upstream.recordSuccess('openmeteo');
-  return data;
-}
-
-// Public wrapper — routes through throttle queue
-async function fetchOpenMeteoWeather(lat, lon) {
-  if (upstream.isBackedOff('openmeteo')) {
-    throw new Error('Open-Meteo is in backoff');
-  }
-  return enqueueOpenMeteoRequest(lat, lon);
-}
-
-// Per-IP weather request throttle: max 1 request per 30 seconds per client
-// Cache hits bypass this — only triggers on actual upstream fetches
-const weatherClientThrottle = new Map(); // ip → lastRequestTime
-const WEATHER_CLIENT_MIN_INTERVAL = 30 * 1000; // 30 seconds
-
-app.get('/api/weather', async (req, res) => {
-  const lat = parseFloat(req.query.lat);
-  const lon = parseFloat(req.query.lon);
-
-  if (isNaN(lat) || isNaN(lon)) {
-    return res.status(400).json({ error: 'lat and lon required' });
-  }
-
-  // Round to whole degrees (~111km grid) — weather doesn't vary within this range
-  // With 2000+ users, this is critical: reduces unique cache keys from thousands to ~hundreds
-  const roundedLat = Math.round(lat);
-  const roundedLon = Math.round(lon);
-  const cacheKey = `weather:${roundedLat},${roundedLon}`;
-
-  const cached = weatherCache.get(cacheKey);
-  const now = Date.now();
-
-  // 1. Fresh cache hit — serve immediately (no throttle needed)
-  if (cached && (now - cached.timestamp) < WEATHER_CACHE_TTL) {
-    return res.json(cached.data);
-  }
-
-  // 2. Per-IP throttle — prevent individual clients from hammering
-  const clientIP = req.ip || req.connection?.remoteAddress || 'unknown';
-  const lastReq = weatherClientThrottle.get(clientIP);
-  if (lastReq && (now - lastReq) < WEATHER_CLIENT_MIN_INTERVAL) {
-    // Throttled — serve stale if available, otherwise 429
-    if (cached) return res.json(cached.data);
-    return res.status(429).json({ error: 'Weather: too many requests, try again shortly' });
-  }
-  weatherClientThrottle.set(clientIP, now);
-
-  // Prune throttle map periodically
-  if (weatherClientThrottle.size > 5000) {
-    const cutoff = now - WEATHER_CLIENT_MIN_INTERVAL * 2;
-    for (const [ip, t] of weatherClientThrottle) {
-      if (t < cutoff) weatherClientThrottle.delete(ip);
-    }
-  }
-
-  // 2. Stale-while-revalidate check
-  const hasStale = cached && (now - cached.timestamp) < WEATHER_STALE_TTL;
-  const isUS = isUSCoordinates(roundedLat, roundedLon);
-
-  // 3. Deduplicated upstream fetch
-  const doFetch = () => upstream.fetch(cacheKey, async () => {
-    let data = null;
-
-    // Try NWS first for US coordinates (free, generous limits)
-    if (isUS) {
-      try {
-        data = await fetchNWSWeather(roundedLat, roundedLon);
-        console.log(`[Weather] NWS success for ${roundedLat},${roundedLon}`);
-      } catch (nwsErr) {
-        console.warn(`[Weather] NWS failed for ${roundedLat},${roundedLon}: ${nwsErr.message} — falling back to Open-Meteo`);
-      }
-    }
-
-    // Fall back to Open-Meteo for international or NWS failure
-    if (!data) {
-      if (upstream.isBackedOff('openmeteo')) {
-        throw new Error('Open-Meteo backed off');
-      }
-      data = await fetchOpenMeteoWeather(roundedLat, roundedLon);
-    }
-
-    weatherCache.set(cacheKey, { data, timestamp: Date.now() });
-
-    // Prune old cache entries (keep under 500)
-    if (weatherCache.size > 500) {
-      const cutoff = Date.now() - WEATHER_STALE_TTL;
-      for (const [key, entry] of weatherCache) {
-        if (entry.timestamp < cutoff) weatherCache.delete(key);
-      }
-    }
-
-    return data;
-  });
-
-  if (hasStale) {
-    // Stale-while-revalidate: respond with stale data now, refresh in background
-    doFetch().catch(() => {});
-    return res.json(cached.data);
-  }
-
-  // No stale data — if queue is backed up, return 202 and let background fill cache
-  // Client retry logic will pick up the data once queue processes and caches it
-  if (openMeteoQueue.queue.length > 10 && !isUS) {
-    // Fire-and-forget the fetch (it'll cache on completion)
-    doFetch().catch(() => {});
-    return res.status(202).json({
-      _pending: true,
-      _source: 'queued',
-      _queueDepth: openMeteoQueue.queue.length,
-      error: 'Weather data loading — will be available shortly'
-    });
-  }
-
-  // Queue is small or it's a US/NWS request — wait for result
-  try {
-    // Add a 15-second timeout so clients don't hang forever
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Weather fetch timeout')), 15000)
-    );
-    const data = await Promise.race([doFetch(), timeoutPromise]);
-    res.json(data);
-  } catch (err) {
-    logErrorOnce('Weather', `Proxy error: ${err.message}`);
-    if (cached && (now - cached.timestamp) < WEATHER_STALE_TTL) {
-      return res.json(cached.data);
-    }
-    // Still enqueue for background cache fill
-    doFetch().catch(() => {});
-    res.status(202).json({
-      _pending: true,
-      _source: 'timeout',
-      error: 'Weather data loading — will be available shortly'
-    });
-  }
+// Weather is now fetched directly by each user's browser from Open-Meteo.
+// This stub exists so old cached client JS (pre-v15.1.7) that still calls
+// /api/weather doesn't get a 404 and crash with a blank screen.
+// The old client already handles the _direct response and falls through to Open-Meteo.
+// New clients never hit this endpoint.
+app.get('/api/weather', (req, res) => {
+  res.json({ _direct: true, _source: 'client-openmeteo' });
 });
 
 // ============================================
@@ -7574,8 +6921,8 @@ app.get('/api/update/status', (req, res) => {
 const WSJTX_UDP_PORT = parseInt(process.env.WSJTX_UDP_PORT || '2237');
 const WSJTX_ENABLED = process.env.WSJTX_ENABLED !== 'false'; // enabled by default
 const WSJTX_RELAY_KEY = process.env.WSJTX_RELAY_KEY || ''; // auth key for remote relay agent
-const WSJTX_MAX_DECODES = 200; // max decodes to keep in memory
-const WSJTX_MAX_AGE = 30 * 60 * 1000; // 30 minutes
+const WSJTX_MAX_DECODES = 500; // max decodes to keep in memory
+const WSJTX_MAX_AGE = 60 * 60 * 1000; // 60 minutes (configurable via client)
 
 // WSJT-X protocol magic number
 const WSJTX_MAGIC = 0xADBCCBDA;
@@ -7635,13 +6982,18 @@ function getRelaySession(sessionId) {
   return wsjtxRelaySessions[sessionId];
 }
 
-// Cleanup expired sessions every 5 minutes
+// Cleanup expired sessions and stale grid cache entries every 5 minutes
 setInterval(() => {
   const now = Date.now();
   for (const [id, session] of Object.entries(wsjtxRelaySessions)) {
     if (now - session.lastAccess > WSJTX_SESSION_MAX_AGE) {
       delete wsjtxRelaySessions[id];
     }
+  }
+  // Prune grid cache entries older than 2 hours
+  const gridCutoff = now - 2 * 60 * 60 * 1000;
+  for (const [call, entry] of wsjtxGridCache) {
+    if (entry.timestamp < gridCutoff) wsjtxGridCache.delete(call);
   }
 }, 5 * 60 * 1000);
 
@@ -7860,30 +7212,65 @@ function parseWSJTXMessage(buffer) {
  * Parse decoded message text to extract callsigns and grid
  * FT8/FT4 messages follow a standard format
  */
+// Callsign → grid cache: remembers grids seen in CQ messages for later QSO exchanges
+const wsjtxGridCache = new Map(); // callsign → { grid, lat, lon, timestamp }
+
 function parseDecodeMessage(text) {
   if (!text) return {};
   const result = {};
   
+  // Grid square regex: 2 alpha + 2 digits, optionally + 2 lowercase alpha
+  const gridRegex = /\b([A-R]{2}\d{2}(?:[a-x]{2})?)\b/i;
+  
   // CQ message: "CQ DX K1ABC FN42" or "CQ K1ABC FN42"
-  const cqMatch = text.match(/^CQ\s+(?:(\S+)\s+)?([A-Z0-9/]+)\s+([A-Z]{2}\d{2}[a-z]{0,2})?/i);
+  const cqMatch = text.match(/^CQ\s+(?:(\S+)\s+)?([A-Z0-9/]+)\s+([A-R]{2}\d{2}[a-x]{0,2})?/i);
   if (cqMatch) {
     result.type = 'CQ';
     result.modifier = cqMatch[1] && !cqMatch[1].match(/^[A-Z0-9/]{3,}$/) ? cqMatch[1] : null;
     result.caller = cqMatch[2] || cqMatch[1];
     result.grid = cqMatch[3] || null;
+    
+    // Cache this callsign's grid for future lookups
+    if (result.caller && result.grid) {
+      const coords = gridToLatLon(result.grid);
+      if (coords) {
+        wsjtxGridCache.set(result.caller.toUpperCase(), {
+          grid: result.grid,
+          lat: coords.latitude,
+          lon: coords.longitude,
+          timestamp: Date.now()
+        });
+      }
+    }
     return result;
   }
   
   // Standard QSO exchange: "K1ABC W2DEF +05" or "K1ABC W2DEF R-12" or "K1ABC W2DEF RR73"
+  // or "K1ABC W2DEF EN82" or "K1ABC W2DEF EN82 a7"
   const qsoMatch = text.match(/^([A-Z0-9/]+)\s+([A-Z0-9/]+)\s+(.*)/i);
   if (qsoMatch) {
     result.type = 'QSO';
     result.dxCall = qsoMatch[1];
     result.deCall = qsoMatch[2];
     result.exchange = qsoMatch[3].trim();
-    // Check for grid in exchange
-    const gridMatch = result.exchange.match(/^([A-Z]{2}\d{2}[a-z]{0,2})$/i);
-    if (gridMatch) result.grid = gridMatch[1];
+    
+    // Look for a grid square ANYWHERE in the exchange text
+    // This handles "EN82", "EN82 a7", "R EN82", etc.
+    const gridMatch = result.exchange.match(gridRegex);
+    if (gridMatch && isValidGrid(gridMatch[1])) {
+      result.grid = gridMatch[1];
+      // Cache grid for both callsigns involved
+      const coords = gridToLatLon(result.grid);
+      if (coords) {
+        // Grid in exchange typically belongs to the calling station (dxCall)
+        wsjtxGridCache.set(result.dxCall.toUpperCase(), {
+          grid: result.grid,
+          lat: coords.latitude,
+          lon: coords.longitude,
+          timestamp: Date.now()
+        });
+      }
+    }
     return result;
   }
   
@@ -7979,6 +7366,34 @@ function handleWSJTXMessage(msg, state) {
         if (coords) {
           decode.lat = coords.latitude;
           decode.lon = coords.longitude;
+        }
+      }
+      
+      // If no grid from message, try callsign → grid cache (from prior CQ/exchange with grid)
+      if (!decode.lat) {
+        const targetCall = (parsed.caller || parsed.dxCall || '').toUpperCase();
+        if (targetCall) {
+          const cached = wsjtxGridCache.get(targetCall);
+          if (cached) {
+            decode.lat = cached.lat;
+            decode.lon = cached.lon;
+            decode.grid = decode.grid || cached.grid;
+            decode.gridSource = 'cache';
+          }
+        }
+      }
+      
+      // Last resort: estimate from callsign prefix
+      if (!decode.lat) {
+        const targetCall = parsed.caller || parsed.dxCall || '';
+        if (targetCall) {
+          const prefixLoc = estimateLocationFromPrefix(targetCall);
+          if (prefixLoc) {
+            decode.lat = prefixLoc.lat;
+            decode.lon = prefixLoc.lon;
+            decode.grid = decode.grid || prefixLoc.grid;
+            decode.gridSource = 'prefix';
+          }
         }
       }
       

@@ -43,6 +43,9 @@ const PSKReporterPanel = ({
   });
   const [wsjtxTab, setWsjtxTab] = useState('decodes');
   const [wsjtxFilter, setWsjtxFilter] = useState('all'); // 'all' | 'cq' | band name
+  const [wsjtxAge, setWsjtxAge] = useState(() => {
+    try { return parseInt(localStorage.getItem('ohc_wsjtx_age')) || 30; } catch { return 30; }
+  }); // minutes: 5, 15, 30, 60
   
   // Persist panel mode and active tab
   const setPanelModePersist = (v) => { setPanelMode(v); try { localStorage.setItem('openhamclock_pskPanelMode', v); } catch {} };
@@ -102,6 +105,11 @@ const PSKReporterPanel = ({
 
   const filteredDecodes = useMemo(() => {
     let filtered = [...wsjtxDecodes];
+    
+    // Time retention filter
+    const ageCutoff = Date.now() - wsjtxAge * 60 * 1000;
+    filtered = filtered.filter(d => d.timestamp >= ageCutoff);
+    
     if (wsjtxFilter === 'cq') {
       filtered = filtered.filter(d => d.type === 'CQ');
     } else if (wsjtxFilter !== 'all') {
@@ -109,7 +117,7 @@ const PSKReporterPanel = ({
       filtered = filtered.filter(d => d.band === wsjtxFilter);
     }
     return filtered.reverse();
-  }, [wsjtxDecodes, wsjtxFilter]);
+  }, [wsjtxDecodes, wsjtxFilter, wsjtxAge]);
 
   const getSnrColor = (snr) => {
     if (snr == null) return 'var(--text-muted)';
@@ -218,7 +226,7 @@ const PSKReporterPanel = ({
             </>
           )}
 
-          {/* WSJT-X: mode/band info + unified filter */}
+          {/* WSJT-X: mode/band info + unified filter + age */}
           {panelMode === 'wsjtx' && (
             <>
               {primaryClient && (
@@ -244,6 +252,26 @@ const PSKReporterPanel = ({
                 {wsjtxFilterOptions.map(o => (
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
+              </select>
+              <select
+                value={wsjtxAge}
+                onChange={(e) => { const v = parseInt(e.target.value); setWsjtxAge(v); try { localStorage.setItem('ohc_wsjtx_age', v); } catch {} }}
+                style={{
+                  background: 'var(--bg-tertiary)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '3px',
+                  fontSize: '10px',
+                  padding: '1px 4px',
+                  cursor: 'pointer',
+                  maxWidth: '55px',
+                }}
+                title="Decode retention time"
+              >
+                <option value={5}>5m</option>
+                <option value={15}>15m</option>
+                <option value={30}>30m</option>
+                <option value={60}>60m</option>
               </select>
             </>
           )}
