@@ -1,6 +1,6 @@
 'use strict';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { syncAllSettingsToServer } from '../../utils';
 
 export default function useDXLocation(defaultDX) {
@@ -30,7 +30,10 @@ export default function useDXLocation(defaultDX) {
     return false;
   });
 
+  const dxLockedRef = useRef(dxLocked);
+
   useEffect(() => {
+    dxLockedRef.current = dxLocked;
     try {
       localStorage.setItem('openhamclock_dxLocked', dxLocked.toString());
       syncAllSettingsToServer();
@@ -42,7 +45,9 @@ export default function useDXLocation(defaultDX) {
   }, []);
 
   const handleDXChange = useCallback((coords) => {
-    setDxLocation({ lat: coords.lat, lon: coords.lon });
+    if (!dxLockedRef.current) {
+      setDxLocation({ lat: coords.lat, lon: coords.lon });
+    }
   }, []);
 
   return {

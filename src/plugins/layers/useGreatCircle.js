@@ -3,7 +3,7 @@
  * Draws the short-path and long-path great circle between DE and DX stations
  */
 import { useState, useEffect, useRef } from 'react';
-import { getGreatCirclePoints, calculateBearing, calculateDistance } from '../../utils/geo.js';
+import { getGreatCirclePoints, replicatePath, calculateBearing, calculateDistance } from '../../utils/geo.js';
 
 export const metadata = {
   id: 'great-circle',
@@ -105,31 +105,35 @@ export function useLayer({ enabled = false, opacity = 0.8, map = null }) {
 
     const tooltipOpts = { sticky: true, direction: 'top', offset: [0, -10] };
 
-    // Short path — solid cyan line
+    // Short path — solid cyan line (replicated across world copies)
     const spPoints = getGreatCirclePoints(de.lat, de.lon, dx.lat, dx.lon, 100);
-    const spLine = L.polyline(spPoints, {
-      color: '#00d4ff',
-      weight: 2.5,
-      opacity: opacity,
-      smoothFactor: 1,
-    });
-    spLine.bindTooltip(popupContent, tooltipOpts);
-    spLine.addTo(map);
-    layersRef.current.push(spLine);
-
-    // Long path — dashed purple line
-    const lpPoints = getLongPathPoints(de.lat, de.lon, dx.lat, dx.lon);
-    if (lpPoints.length > 0) {
-      const lpLine = L.polyline(lpPoints, {
-        color: '#b388ff',
-        weight: 1.5,
-        opacity: opacity * 0.5,
-        dashArray: '8, 6',
+    replicatePath(spPoints).forEach(copy => {
+      const spLine = L.polyline(copy, {
+        color: '#00d4ff',
+        weight: 2.5,
+        opacity: opacity,
         smoothFactor: 1,
       });
-      lpLine.bindTooltip(popupContent, tooltipOpts);
-      lpLine.addTo(map);
-      layersRef.current.push(lpLine);
+      spLine.bindTooltip(popupContent, tooltipOpts);
+      spLine.addTo(map);
+      layersRef.current.push(spLine);
+    });
+
+    // Long path — dashed purple line (replicated across world copies)
+    const lpPoints = getLongPathPoints(de.lat, de.lon, dx.lat, dx.lon);
+    if (lpPoints.length > 0) {
+      replicatePath(lpPoints).forEach(copy => {
+        const lpLine = L.polyline(copy, {
+          color: '#b388ff',
+          weight: 1.5,
+          opacity: opacity * 0.5,
+          dashArray: '8, 6',
+          smoothFactor: 1,
+        });
+        lpLine.bindTooltip(popupContent, tooltipOpts);
+        lpLine.addTo(map);
+        layersRef.current.push(lpLine);
+      });
     }
 
     return () => {

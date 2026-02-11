@@ -15,10 +15,10 @@ import { useTranslation } from 'react-i18next';
 import { useWeather } from '../hooks';
 import { usePanelResize } from '../contexts';
 
-export const WeatherPanel = ({ 
-  location, 
-  tempUnit, 
-  onTempUnitChange, 
+export const WeatherPanel = ({
+  location,
+  tempUnit,
+  onTempUnitChange,
   nodeId,
   weatherData   // Optional: pre-fetched { data, loading, error } from useWeather
 }) => {
@@ -61,7 +61,7 @@ export const WeatherPanel = ({
   // Use pre-fetched data if provided, otherwise fetch our own
   const ownWeather = useWeather(weatherData ? null : location, tempUnit);
   const weather = weatherData || ownWeather;
-  
+
   const { data: w, loading, error } = weather;
 
   // --- Loading state ---
@@ -70,7 +70,7 @@ export const WeatherPanel = ({
       <div ref={contentRef} style={{ marginTop: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontSize: '20px', lineHeight: 1, opacity: 0.4 }}>🌡️</span>
-          <span style={{ 
+          <span style={{
             fontSize: '14px', color: 'var(--text-muted)', fontFamily: 'JetBrains Mono, monospace',
             animation: 'pulse 1.5s ease-in-out infinite'
           }}>
@@ -82,6 +82,16 @@ export const WeatherPanel = ({
     );
   }
 
+  // Translate error messages from useWeather hook
+  const getErrorMessage = (msg) => {
+    switch (msg) {
+      case 'Weather unavailable': return t('weather.error.unavailable');
+      case 'Weather service busy': return t('weather.error.busy');
+      case 'Weather loading...': return t('weather.error.loading');
+      default: return msg;
+    }
+  };
+
   // --- Error state (no data at all) ---
   if (!w && error) {
     return (
@@ -89,8 +99,8 @@ export const WeatherPanel = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontSize: '16px', lineHeight: 1 }}>⚠️</span>
           <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'JetBrains Mono, monospace' }}>
-            {error.message}
-            {error.retryIn ? ` · retrying in ${error.retryIn}s` : ''}
+            {getErrorMessage(error.message)}
+            {error.retryIn ? t('weather.error.retry', { seconds: error.retryIn }) : ''}
           </span>
         </div>
       </div>
@@ -101,15 +111,15 @@ export const WeatherPanel = ({
   if (!w) return null;
 
   const deg = `°${w.tempUnit || tempUnit}`;
-  const wind = w.windUnit || 'mph';
-  const vis = w.visUnit || 'mi';
+  const wind = t(`weather.unit.${w.windUnit === 'km/h' ? 'kmh' : 'mph'}`);
+  const vis = t(`weather.unit.${w.visUnit === 'km' ? 'km' : 'mi'}`);
 
   return (
     <div ref={contentRef} style={{ marginTop: '12px', borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
       {/* Compact summary row — always visible */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <div
-          onClick={() => { const next = !weatherExpanded; setWeatherExpanded(next); try { localStorage.setItem('openhamclock_weatherExpanded', next.toString()); } catch {} }}
+          onClick={() => { const next = !weatherExpanded; setWeatherExpanded(next); try { localStorage.setItem('openhamclock_weatherExpanded', next.toString()); } catch { } }}
           style={{
             display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer',
             userSelect: 'none', flex: 1, minWidth: 0,
@@ -119,7 +129,9 @@ export const WeatherPanel = ({
           <span style={{ fontSize: '18px', fontWeight: '700', color: 'var(--text-primary)', fontFamily: 'Orbitron, monospace' }}>
             {w.temp}{deg}
           </span>
-          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.description}</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {t(`weather.condition.${w.weatherCode}`, { defaultValue: w.description })}
+          </span>
           <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'JetBrains Mono, monospace' }}>
             💨{w.windSpeed}
           </span>
@@ -157,11 +169,11 @@ export const WeatherPanel = ({
 
       {/* Error badge — show when data is stale but we have cached data */}
       {error && w && (
-        <div style={{ 
-          fontSize: '9px', color: 'var(--accent-amber)', fontFamily: 'JetBrains Mono, monospace', 
-          marginTop: '4px', opacity: 0.7 
+        <div style={{
+          fontSize: '9px', color: 'var(--accent-amber)', fontFamily: 'JetBrains Mono, monospace',
+          marginTop: '4px', opacity: 0.7
         }}>
-          ⚠ {error.message}{error.retryIn ? ` · retry in ${error.retryIn}s` : ''}
+          ⚠ {getErrorMessage(error.message)}{error.retryIn ? t('weather.error.retry', { seconds: error.retryIn }) : ''}
         </div>
       )}
 
@@ -192,7 +204,9 @@ export const WeatherPanel = ({
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-muted)' }}>{t('weather.wind')}</span>
-              <span style={{ color: 'var(--text-secondary)' }}>{w.windDir} {w.windSpeed} {wind}</span>
+              <span style={{ color: 'var(--text-secondary)' }}>
+                {t(`weather.wind.${w.windDir}`, { defaultValue: w.windDir })} {w.windSpeed} {wind}
+              </span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: 'var(--text-muted)' }}>{t('weather.humidity')}</span>

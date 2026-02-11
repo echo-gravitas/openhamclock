@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { getBandColor } from '../../utils/callsign.js';
-import { getGreatCirclePoints } from '../../utils/geo.js';
+import { getGreatCirclePoints, replicatePath, replicatePoint } from '../../utils/geo.js';
 
 export const metadata = {
   id: 'contest_qsos',
@@ -93,13 +93,15 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
       if (de && Number.isFinite(de.lat) && Number.isFinite(de.lon)) {
         const points = getGreatCirclePoints(de.lat, de.lon, lat, lon, 50);
         if (Array.isArray(points) && points.length > 1) {
-          const line = L.polyline(points, {
-            color: bandColor,
-            weight: 1.5,
-            opacity: lineOpacity,
-            dashArray: '2, 6'
-          }).addTo(map);
-          linesRef.current.push(line);
+          replicatePath(points).forEach(copy => {
+            const line = L.polyline(copy, {
+              color: bandColor,
+              weight: 1.5,
+              opacity: lineOpacity,
+              dashArray: '2, 6'
+            }).addTo(map);
+            linesRef.current.push(line);
+          });
         }
       }
 
@@ -107,21 +109,23 @@ export function useLayer({ enabled = false, opacity = 0.7, map = null }) {
       const timeLabel = qso.time || (qso.timestamp ? new Date(qso.timestamp).toLocaleTimeString() : '');
       const sourceLabel = qso.source ? qso.source.toUpperCase() : '';
 
-      const marker = L.circleMarker([lat, lon], {
-        radius: 5,
-        fillColor: bandColor,
-        color: '#fff',
-        weight: 1,
-        opacity: 0.9,
-        fillOpacity: markerOpacity
-      }).bindPopup(`
-        <b>${qso.dxCall || ''}</b><br>
-        ${qso.mode || ''} ${bandLabel}<br>
-        ${timeLabel ? `${timeLabel}<br>` : ''}
-        ${sourceLabel}
-      `).addTo(map);
+      replicatePoint(lat, lon).forEach(([rLat, rLon]) => {
+        const marker = L.circleMarker([rLat, rLon], {
+          radius: 5,
+          fillColor: bandColor,
+          color: '#fff',
+          weight: 1,
+          opacity: 0.9,
+          fillOpacity: markerOpacity
+        }).bindPopup(`
+          <b>${qso.dxCall || ''}</b><br>
+          ${qso.mode || ''} ${bandLabel}<br>
+          ${timeLabel ? `${timeLabel}<br>` : ''}
+          ${sourceLabel}
+        `).addTo(map);
 
-      markersRef.current.push(marker);
+        markersRef.current.push(marker);
+      });
     });
   }, [qsos, enabled, opacity, map, deLocation]);
 

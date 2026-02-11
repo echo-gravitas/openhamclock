@@ -8,7 +8,10 @@ import {
   calculateGridSquare, 
   getSunPosition, 
   getMoonPosition, 
-  getGreatCirclePoints 
+  getGreatCirclePoints,
+  replicatePath,
+  replicatePoint,
+  normalizeLon
 } from '../utils/geo.js';
 import { getBandColor } from '../utils/callsign.js';
 import { createTerminator } from '../utils/terminator.js';
@@ -72,6 +75,20 @@ export const WorldMap = ({
   const deLocator = useMemo(() => {
     if (!deLocation?.lat || !deLocation?.lon) return '';
     return calculateGridSquare(deLocation.lat, deLocation.lon);
+  }, [deLocation?.lat, deLocation?.lon]);
+
+  // Expose DE location to window for plugins (e.g., RBN)
+  useEffect(() => {
+    if (deLocation?.lat && deLocation?.lon) {
+      window.deLocation = {
+        lat: deLocation.lat,
+        lon: deLocation.lon
+      };
+    }
+    return () => {
+      // Cleanup on unmount
+      delete window.deLocation;
+    };
   }, [deLocation?.lat, deLocation?.lon]);
 
   // Keep dxLockedRef in sync with prop
@@ -438,45 +455,43 @@ export const WorldMap = ({
           const isHovered = hoveredSpot && 
                            hoveredSpot.call?.toUpperCase() === path.dxCall?.toUpperCase();
           
-          // Handle path rendering (single continuous array, unwrapped across antimeridian)
-          if (pathPoints && Array.isArray(pathPoints) && pathPoints.length > 1) {
-            const line = L.polyline(pathPoints, {
+          // Render polyline on all 3 world copies so it's visible across the dateline
+          replicatePath(pathPoints).forEach(copy => {
+            const line = L.polyline(copy, {
               color: isHovered ? '#ffffff' : color,
               weight: isHovered ? 4 : 1.5,
               opacity: isHovered ? 1 : 0.5
             }).addTo(map);
             if (isHovered) line.bringToFront();
             dxPathsLinesRef.current.push(line);
-          }
+          });
 
-          // Use unwrapped endpoint so marker sits where the line ends
-          const endPoint = pathPoints[pathPoints.length - 1];
-          const dxLatDisplay = endPoint[0];
-          const dxLonDisplay = endPoint[1];
-
-          // Add DX marker
-          const dxCircle = L.circleMarker([dxLatDisplay, dxLonDisplay], {
-            radius: isHovered ? 12 : 6,
-            fillColor: isHovered ? '#ffffff' : color,
-            color: isHovered ? color : '#fff',
-            weight: isHovered ? 3 : 1.5,
-            opacity: 1,
-            fillOpacity: isHovered ? 1 : 0.9
-          })
-            .bindPopup(`<b style="color: ${color}">${path.dxCall}</b><br>${path.freq} MHz<br>by ${path.spotter}`)
-            .addTo(map);
-          if (isHovered) dxCircle.bringToFront();
-          dxPathsMarkersRef.current.push(dxCircle);
+          // Render circleMarker on all 3 world copies
+          replicatePoint(path.dxLat, path.dxLon).forEach(([lat, lon]) => {
+            const dxCircle = L.circleMarker([lat, lon], {
+              radius: isHovered ? 12 : 6,
+              fillColor: isHovered ? '#ffffff' : color,
+              color: isHovered ? color : '#fff',
+              weight: isHovered ? 3 : 1.5,
+              opacity: 1,
+              fillOpacity: isHovered ? 1 : 0.9
+            })
+              .bindPopup(`<b style="color: ${color}">${path.dxCall}</b><br>${path.freq} MHz<br>by ${path.spotter}`)
+              .addTo(map);
+            if (isHovered) dxCircle.bringToFront();
+            dxPathsMarkersRef.current.push(dxCircle);
+          });
           
-          // Add label if enabled
+          // Add label if enabled (L.marker with divIcon auto-duplicates across world copies)
           if (showDXLabels || isHovered) {
+            const dxLonNorm = normalizeLon(path.dxLon);
             const labelIcon = L.divIcon({
               className: '',
               html: `<span style="display:inline-block;background:${isHovered ? '#fff' : color};color:${isHovered ? color : '#000'};padding:${isHovered ? '5px 10px' : '4px 8px'};border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:${isHovered ? '14px' : '12px'};font-weight:700;white-space:nowrap;border:2px solid ${isHovered ? color : 'rgba(0,0,0,0.5)'};box-shadow:0 2px ${isHovered ? '8px' : '4px'} rgba(0,0,0,${isHovered ? '0.6' : '0.4'});">${path.dxCall}</span>`,
               iconSize: null,
               iconAnchor: [0, 0]
             });
-            const label = L.marker([dxLatDisplay, dxLonDisplay], { 
+            const label = L.marker([path.dxLat, dxLonNorm], { 
               icon: labelIcon, 
               interactive: false,
               zIndexOffset: isHovered ? 10000 : 0
@@ -546,33 +561,38 @@ export const WorldMap = ({
         
         // Draw orbit track if available
         if (sat.track && sat.track.length > 1) {
-          // Unwrap longitudes for continuous rendering across antimeridian
+          // Unwrap longitudes for continuous path, then replicate across world copies
           const unwrapped = sat.track.map(p => [...p]);
           for (let i = 1; i < unwrapped.length; i++) {
             while (unwrapped[i][1] - unwrapped[i-1][1] > 180) unwrapped[i][1] -= 360;
             while (unwrapped[i][1] - unwrapped[i-1][1] < -180) unwrapped[i][1] += 360;
           }
           
-          const trackLine = L.polyline(unwrapped, {
-            color: sat.visible ? satColor : satColorDark,
-            weight: 2,
-            opacity: sat.visible ? 0.8 : 0.4,
-            dashArray: sat.visible ? null : '5, 5'
-          }).addTo(map);
-          satTracksRef.current.push(trackLine);
+          // Render on all 3 world copies
+          replicatePath(unwrapped).forEach(copy => {
+            const trackLine = L.polyline(copy, {
+              color: sat.visible ? satColor : satColorDark,
+              weight: 2,
+              opacity: sat.visible ? 0.8 : 0.4,
+              dashArray: sat.visible ? null : '5, 5'
+            }).addTo(map);
+            satTracksRef.current.push(trackLine);
+          });
         }
         
         // Draw footprint circle if available and satellite is visible
         if (sat.footprintRadius && sat.lat && sat.lon && sat.visible) {
-          const footprint = L.circle([sat.lat, sat.lon], {
-            radius: sat.footprintRadius * 1000, // Convert km to meters
-            color: satColor,
-            weight: 1,
-            opacity: 0.5,
-            fillColor: satColor,
-            fillOpacity: 0.1
-          }).addTo(map);
-          satTracksRef.current.push(footprint);
+          replicatePoint(sat.lat, sat.lon).forEach(([fLat, fLon]) => {
+            const footprint = L.circle([fLat, fLon], {
+              radius: sat.footprintRadius * 1000, // Convert km to meters
+              color: satColor,
+              weight: 1,
+              opacity: 0.5,
+              fillColor: satColor,
+              fillOpacity: 0.1
+            }).addTo(map);
+            satTracksRef.current.push(footprint);
+          });
         }
         
         // Add satellite marker icon
@@ -711,37 +731,36 @@ export const WorldMap = ({
               50
             );
             
-            // Validate points before creating polyline (single continuous array, unwrapped across antimeridian)
+            // Render polyline on all 3 world copies
             if (points && Array.isArray(points) && points.length > 1 && 
                 points.every(p => Array.isArray(p) && !isNaN(p[0]) && !isNaN(p[1]))) {
-              const line = L.polyline(points, {
-                color: bandColor,
-                weight: 1.5,
-                opacity: 0.5,
-                dashArray: '4, 4'
-              }).addTo(map);
-              pskMarkersRef.current.push(line);
-              
-              // Use unwrapped endpoint so dot sits where the line ends
-              const endPoint = points[points.length - 1];
-              spotLat = endPoint[0];
-              spotLon = endPoint[1];
+              replicatePath(points).forEach(copy => {
+                const line = L.polyline(copy, {
+                  color: bandColor,
+                  weight: 1.5,
+                  opacity: 0.5,
+                  dashArray: '4, 4'
+                }).addTo(map);
+                pskMarkersRef.current.push(line);
+              });
             }
             
-            // Add small dot marker at spot location
-            const circle = L.circleMarker([spotLat, spotLon], {
-              radius: 4,
-              fillColor: bandColor,
-              color: '#fff',
-              weight: 1,
-              opacity: 0.9,
-              fillOpacity: 0.8
-            }).bindPopup(`
-              <b>${displayCall}</b><br>
-              ${spot.mode} @ ${freqMHz} MHz<br>
-              ${spot.snr !== null ? `SNR: ${spot.snr > 0 ? '+' : ''}${spot.snr} dB` : ''}
-            `).addTo(map);
-            pskMarkersRef.current.push(circle);
+            // Render circleMarker on all 3 world copies
+            replicatePoint(spotLat, spotLon).forEach(([rLat, rLon]) => {
+              const circle = L.circleMarker([rLat, rLon], {
+                radius: 4,
+                fillColor: bandColor,
+                color: '#fff',
+                weight: 1,
+                opacity: 0.9,
+                fillOpacity: 0.8
+              }).bindPopup(`
+                <b>${displayCall}</b><br>
+                ${spot.mode} @ ${freqMHz} MHz<br>
+                ${spot.snr !== null ? `SNR: ${spot.snr > 0 ? '+' : ''}${spot.snr} dB` : ''}
+              `).addTo(map);
+              pskMarkersRef.current.push(circle);
+            });
           } catch (err) {
             console.warn('Error rendering PSKReporter spot:', err);
           }
@@ -793,21 +812,20 @@ export const WorldMap = ({
 
             if (points && Array.isArray(points) && points.length > 1 &&
                 points.every(p => Array.isArray(p) && !isNaN(p[0]) && !isNaN(p[1]))) {
-              const line = L.polyline(points, {
-                color: '#a78bfa',
-                weight: 1.5,
-                opacity: isEstimated ? 0.15 : 0.4,
-                dashArray: '2, 6'
-              }).addTo(map);
-              wsjtxMarkersRef.current.push(line);
-
-              const endPoint = points[points.length - 1];
-              spotLat = endPoint[0];
-              spotLon = endPoint[1];
+              // Render polyline on all 3 world copies
+              replicatePath(points).forEach(copy => {
+                const line = L.polyline(copy, {
+                  color: '#a78bfa',
+                  weight: 1.5,
+                  opacity: isEstimated ? 0.15 : 0.4,
+                  dashArray: '2, 6'
+                }).addTo(map);
+                wsjtxMarkersRef.current.push(line);
+              });
             }
 
-            // Diamond-shaped marker to distinguish from PSK circles
-            const diamond = L.marker([spotLat, spotLon], {
+            // Diamond-shaped marker (L.marker with divIcon auto-duplicates across world copies)
+            const diamond = L.marker([spotLat, normalizeLon(spotLon)], {
               icon: L.divIcon({
                 className: '',
                 html: `<div style="

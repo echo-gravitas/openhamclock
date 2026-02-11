@@ -253,8 +253,24 @@ export const calculateSunTimes = (lat, lon, date) => {
 };
 
 /**
+ * Normalize longitude to -180..180 range
+ */
+export const normalizeLon = (lon) => {
+  while (lon > 180) lon -= 360;
+  while (lon < -180) lon += 360;
+  return lon;
+};
+
+/**
+ * World copy offsets — render overlays at -360, 0, +360 so they appear on
+ * every visible copy of the map. Same approach as the GrayLine plugin.
+ */
+export const WORLD_COPY_OFFSETS = [-360, 0, 360];
+
+/**
  * Calculate great circle path points for Leaflet
- * Handles antimeridian crossing by returning multiple segments
+ * Returns unwrapped (continuous) coordinates for smooth rendering.
+ * Use replicatePath() to create copies for all visible world copies.
  */
 export const getGreatCirclePoints = (lat1, lon1, lat2, lon2, n = 100) => {
   const toRad = d => d * Math.PI / 180;
@@ -293,6 +309,27 @@ export const getGreatCirclePoints = (lat1, lon1, lat2, lon2, n = 100) => {
   return rawPoints;
 };
 
+/**
+ * Replicate an unwrapped polyline path across 3 world copies (-360, 0, +360).
+ * Returns an array of 3 coordinate arrays, one per world copy.
+ * Each copy can be passed directly to L.polyline().
+ */
+export const replicatePath = (points) => {
+  if (!points || points.length < 2) return [points || []];
+  return WORLD_COPY_OFFSETS.map(offset =>
+    points.map(([lat, lon]) => [lat, lon + offset])
+  );
+};
+
+/**
+ * Replicate a single [lat, lon] point across 3 world copies.
+ * Returns an array of 3 [lat, lon] pairs for use with L.circleMarker etc.
+ */
+export const replicatePoint = (lat, lon) => {
+  const nLon = normalizeLon(lon);
+  return WORLD_COPY_OFFSETS.map(offset => [lat, nLon + offset]);
+};
+
 export default {
   calculateGridSquare,
   calculateBearing,
@@ -302,5 +339,9 @@ export default {
   getMoonPhase,
   getMoonPhaseEmoji,
   calculateSunTimes,
-  getGreatCirclePoints
+  getGreatCirclePoints,
+  replicatePath,
+  replicatePoint,
+  normalizeLon,
+  WORLD_COPY_OFFSETS
 };
