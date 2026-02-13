@@ -19,6 +19,8 @@
 const express = require('express');
 const cors = require('cors');
 const compression = require('compression');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fetch = require('node-fetch');
 const net = require('net');
@@ -75,6 +77,18 @@ if (fs.existsSync(envPath)) {
 const app = express();
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0';
+
+// Security: API key for write operations (set in .env to protect POST endpoints)
+// If not set, write endpoints are open (backward-compatible for local installs)
+const API_WRITE_KEY = process.env.API_WRITE_KEY || '';
+
+// Helper: check write auth on POST endpoints that modify server state
+function requireWriteAuth(req, res, next) {
+  if (!API_WRITE_KEY) return next(); // No key configured = open (local installs)
+  const token = req.headers.authorization?.replace('Bearer ', '') || req.query.key || '';
+  if (token === API_WRITE_KEY) return next();
+  return res.status(401).json({ error: 'Unauthorized — set Authorization: Bearer <API_WRITE_KEY>' });
+}
 
 // ============================================
 // UPSTREAM REQUEST MANAGER
@@ -338,9 +352,44 @@ if (ITURHFPROP_URL) {
   console.log('[Propagation] Standalone mode - using built-in calculations');
 }
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+// Middleware — Security
+app.use(helmet({
+  contentSecurityPolicy: false, // CSP breaks inline Leaflet/React scripts
+  crossOriginEmbedderPolicy: false // Breaks tile loading from CDNs
+}));
+
+// CORS — restrict to same origin by default; allow override via env
+const CORS_ORIGINS = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
+  : true; // true = reflect request origin (same as before for local installs)
+app.use(cors({
+  origin: CORS_ORIGINS,
+  methods: ['GET', 'POST'],
+  maxAge: 86400
+}));
+
+// Rate limiting — protect against abuse
+// NOTE: OpenHamClock is a real-time dashboard that polls many endpoints every few seconds
+// per connected client, so the general limit must be generous for normal operation.
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 600, // 600 requests per minute per IP (10/sec covers normal dashboard polling)
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later' }
+});
+app.use('/api/', apiLimiter);
+
+// Stricter rate limit for write/expensive endpoints
+const writeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests' }
+});
+
+app.use(express.json({ limit: '1mb' })); // Limit body size to prevent DoS
 
 // GZIP compression - reduces response sizes by 70-90%
 // This is critical for reducing bandwidth/egress costs
@@ -2340,6 +2389,30 @@ app.get('/api/dxcluster/paths', async (req, res) => {
   const customPort = parseInt(req.query.port) || 7300;
   const userCallsign = req.query.callsign;
   
+  // SECURITY: Validate custom host to prevent SSRF (internal network scanning)
+  if (source === 'custom' && customHost) {
+    // Block private/reserved IP ranges and localhost
+    const blockedPatterns = /^(localhost|127\.|10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|169\.254\.|0\.|0:|\[::1\]|::1|fe80:|fc00:|fd00:|ff00:)/i;
+    if (blockedPatterns.test(customHost)) {
+      return res.status(400).json({ error: 'Custom host cannot be a private/reserved address' });
+    }
+    // Block numeric-only hosts (raw IPs) that could be encoded to bypass above
+    // Only allow hostnames that look like legitimate DX Spider nodes
+    if (/^\d+\.\d+\.\d+\.\d+$/.test(customHost)) {
+      const octets = customHost.split('.').map(Number);
+      if (octets[0] === 10 || octets[0] === 127 || octets[0] === 0 ||
+          (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+          (octets[0] === 192 && octets[1] === 168) ||
+          (octets[0] === 169 && octets[1] === 254)) {
+        return res.status(400).json({ error: 'Custom host cannot be a private/reserved address' });
+      }
+    }
+    // Restrict port range to common DX Spider/telnet ports
+    if (customPort < 1024 || customPort > 49151) {
+      return res.status(400).json({ error: 'Port must be between 1024 and 49151' });
+    }
+  }
+  
   // Generate cache key based on source (custom sources shouldn't share cache)
   const cacheKey = source === 'custom' ? `custom-${customHost}-${customPort}` : 'default';
   
@@ -2488,6 +2561,57 @@ app.get('/api/dxcluster/paths', async (req, res) => {
       }
     }
     
+    // Check HamQTH callsign cache for better accuracy (24h TTL, populated by /api/callsign/:call)
+    // This gives DXCC-level lat/lon which is more accurate than prefix country centroids
+    const hamqthLocations = {};
+    const hamqthMisses = []; // Callsigns to look up in background
+    for (const call of callsToLookup) {
+      const cached = callsignLookupCache.get(call);
+      if (cached && (now - cached.timestamp) < CALLSIGN_CACHE_TTL && cached.data?.lat != null) {
+        hamqthLocations[call] = {
+          lat: cached.data.lat,
+          lon: cached.data.lon,
+          country: cached.data.country || '',
+          grid: cached.data.grid || null,
+          source: 'hamqth'
+        };
+      } else if (!prefixLocations[call]?.grid) {
+        // Only queue lookups for calls that don't already have grid-level accuracy
+        hamqthMisses.push(call);
+      }
+    }
+    
+    // Fire background HamQTH lookups for cache misses (non-blocking, improves next poll)
+    // Limit to 10 per cycle to avoid hammering HamQTH
+    if (hamqthMisses.length > 0) {
+      const batch = hamqthMisses.slice(0, 10);
+      logDebug('[DX Paths] Background HamQTH lookup for', batch.length, 'callsigns');
+      for (const call of batch) {
+        // Fire-and-forget — results land in callsignLookupCache for next poll
+        fetch(`https://www.hamqth.com/dxcc.php?callsign=${encodeURIComponent(call)}`, {
+          headers: { 'User-Agent': 'OpenHamClock/' + APP_VERSION },
+          signal: AbortSignal.timeout(5000)
+        }).then(async (resp) => {
+          if (!resp.ok) return;
+          const text = await resp.text();
+          const latMatch = text.match(/<lat>([^<]+)<\/lat>/);
+          const lonMatch = text.match(/<lng>([^<]+)<\/lng>/);
+          const countryMatch = text.match(/<n>([^<]+)<\/name>/);
+          if (latMatch && lonMatch) {
+            callsignLookupCache.set(call, {
+              data: {
+                callsign: call,
+                lat: parseFloat(latMatch[1]),
+                lon: parseFloat(lonMatch[1]),
+                country: countryMatch ? countryMatch[1] : ''
+              },
+              timestamp: Date.now()
+            });
+          }
+        }).catch(() => {}); // Silent fail for background lookups
+      }
+    }
+    
     // Build new paths with locations - try grid first, fall back to prefix
     const newPaths = newSpots
       .map(spot => {
@@ -2514,6 +2638,11 @@ app.get('/api/dxcluster/paths', async (req, res) => {
               dxGridSquare = extractedGrids.dxGrid;
             }
           }
+        }
+        
+        // Fall back to HamQTH cached location (more accurate than prefix)
+        if (!dxLoc && hamqthLocations[spot.dxCall]) {
+          dxLoc = hamqthLocations[spot.dxCall];
         }
         
         // Fall back to prefix location (now includes grid-based coordinates!)
@@ -2547,6 +2676,11 @@ app.get('/api/dxcluster/paths', async (req, res) => {
               spotterGridSquare = extractedGrids.spotterGrid;
             }
           }
+        }
+        
+        // Fall back to HamQTH cached location for spotter
+        if (!spotterLoc && hamqthLocations[spot.spotter]) {
+          spotterLoc = hamqthLocations[spot.spotter];
         }
         
         // Fall back to prefix location for spotter (now includes grid-based coordinates!)
@@ -2644,7 +2778,11 @@ app.get('/api/callsign/:call', async (req, res) => {
   
   try {
     // Try HamQTH XML API (no auth needed for basic lookup)
-    const response = await fetch(`https://www.hamqth.com/dxcc.php?callsign=${callsign}`);
+    // SECURITY: Validate callsign format and encode for URL
+    if (!/^[A-Z0-9\/\-]{1,20}$/.test(callsign)) {
+      return res.status(400).json({ error: 'Invalid callsign format' });
+    }
+    const response = await fetch(`https://www.hamqth.com/dxcc.php?callsign=${encodeURIComponent(callsign)}`);
     if (response.ok) {
       const text = await response.text();
       
@@ -5301,8 +5439,8 @@ app.get('/api/propagation', async (req, res) => {
     }
     
     // ===== FALLBACK: Built-in calculations =====
-    const bands = ['160m', '80m', '40m', '30m', '20m', '17m', '15m', '12m', '11m', '10m', '6m'];
-    const bandFreqs = [1.8, 3.5, 7, 10, 14, 18, 21, 24, 27, 28, 50];
+    const bands = ['160m', '80m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
+    const bandFreqs = [1.8, 3.5, 7, 10, 14, 18, 21, 24, 28];
     
     // Generate predictions (hybrid or fallback)
     const effectiveIonoData = hasValidIonoData ? ionoData : null;
@@ -6843,6 +6981,10 @@ function generateStatusDashboard() {
 app.get('/api/health', (req, res) => {
   rolloverVisitorStats();
   
+  // SECURITY: Check if request is authenticated for full details
+  const token = req.headers.authorization?.replace('Bearer ', '') || req.query.key || '';
+  const isAuthed = API_WRITE_KEY && token === API_WRITE_KEY;
+  
   // Check if browser wants HTML or explicitly requesting JSON
   const wantsJSON = req.query.format === 'json' || 
                     req.headers.accept?.includes('application/json') ||
@@ -6863,11 +7005,12 @@ app.get('/api/health', (req, res) => {
       uptime: process.uptime(),
       uptimeFormatted: `${Math.floor(process.uptime() / 86400)}d ${Math.floor((process.uptime() % 86400) / 3600)}h ${Math.floor((process.uptime() % 3600) / 60)}m`,
       timestamp: new Date().toISOString(),
-      persistence: {
+      // SECURITY: Only expose file paths and detailed internals to authenticated requests
+      persistence: isAuthed ? {
         enabled: !!STATS_FILE,
         file: STATS_FILE || null,
         lastSaved: visitorStats.lastSaved
-      },
+      } : { enabled: !!STATS_FILE },
       sessions: sessionTracker.getStats(),
       visitors: {
         today: {
@@ -6920,7 +7063,8 @@ app.get('/api/health', (req, res) => {
         totalInFlight: upstream.inFlight.size,
         pskMqttProxy: {
           connected: pskMqtt.connected,
-          activeCallsigns: [...pskMqtt.subscribedCalls],
+          // SECURITY: Only expose active callsigns to authenticated requests
+          activeCallsigns: isAuthed ? [...pskMqtt.subscribedCalls] : pskMqtt.subscribedCalls.size,
           sseClients: [...pskMqtt.subscribers.values()].reduce((n, s) => n + s.size, 0),
           spotsReceived: pskMqtt.stats.spotsReceived,
           spotsRelayed: pskMqtt.stats.spotsRelayed,
@@ -7024,7 +7168,7 @@ app.get('/api/settings', (req, res) => {
 });
 
 // POST /api/settings — save UI settings (or 404 if sync disabled)
-app.post('/api/settings', (req, res) => {
+app.post('/api/settings', writeLimiter, requireWriteAuth, (req, res) => {
   if (!SETTINGS_SYNC_ENABLED) {
     return res.status(404).json({ enabled: false });
   }
@@ -7126,7 +7270,7 @@ app.get('/api/weather', (req, res) => {
 // ============================================
 // MANUAL UPDATE ENDPOINT
 // ============================================
-app.post('/api/update', async (req, res) => {
+app.post('/api/update', writeLimiter, requireWriteAuth, async (req, res) => {
   if (autoUpdateState.inProgress) {
     return res.status(409).json({ error: 'Update already in progress' });
   }
@@ -7759,7 +7903,7 @@ async function lookupCallLatLon(callsign) {
 }
 
 // POST one QSO from a bridge (your Python script)
-app.post("/api/n3fjp/qso", async (req, res) => {
+app.post("/api/n3fjp/qso", writeLimiter, requireWriteAuth, async (req, res) => {
   const qso = req.body || {};
   if (!qso.dx_call) return res.status(400).json({ ok: false, error: "dx_call required" });
 
@@ -7993,12 +8137,26 @@ app.get('/api/wsjtx/relay/download/:platform', (req, res) => {
     return res.status(400).json({ error: 'Session ID required — download from the OpenHamClock dashboard' });
   }
   
+  // SECURITY: Validate platform parameter
+  if (!['linux', 'mac', 'windows'].includes(platform)) {
+    return res.status(400).json({ error: 'Invalid platform. Use: linux, mac, or windows' });
+  }
+  
+  // SECURITY: Sanitize all values embedded into generated scripts to prevent command injection
+  // Only allow URL-safe characters in serverURL, alphanumeric + hyphen/underscore in session/key
+  function sanitizeForShell(str) {
+    return String(str).replace(/[^a-zA-Z0-9._\-:\/\@]/g, '');
+  }
+  const safeServerURL = sanitizeForShell(serverURL);
+  const safeSessionId = sanitizeForShell(sessionId);
+  const safeRelayKey = sanitizeForShell(WSJTX_RELAY_KEY);
+  
   if (platform === 'linux' || platform === 'mac') {
     // Build bash script with relay.js embedded as heredoc
     const lines = [
       '#!/bin/bash',
       '# OpenHamClock WSJT-X Relay — Auto-configured',
-      '# Generated by ' + serverURL,
+      '# Generated by ' + safeServerURL,
       '#',
       '# Usage:  bash ' + (platform === 'mac' ? 'start-relay.command' : 'start-relay.sh'),
       '# Stop:   Ctrl+C',
@@ -8033,9 +8191,9 @@ app.get('/api/wsjtx/relay/download/:platform', (req, res) => {
       '',
       '# Run relay',
       'exec node "$RELAY_FILE" \\',
-      '  --url "' + serverURL + '" \\',
-      '  --key "' + WSJTX_RELAY_KEY + '" \\',
-      '  --session "' + sessionId + '"',
+      '  --url "' + safeServerURL + '" \\',
+      '  --key "' + safeRelayKey + '" \\',
+      '  --session "' + safeSessionId + '"',
     ];
     
     const script = lines.join('\n') + '\n';
@@ -8111,12 +8269,12 @@ app.get('/api/wsjtx/relay/download/:platform', (req, res) => {
       'echo.',
       '',
       ':have_node',
-      'echo   Server: ' + serverURL,
+      'echo   Server: ' + safeServerURL,
       'echo.',
       '',
       ':: Download relay agent',
       'echo   Downloading relay agent...',
-      'powershell -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri \'' + serverURL + '/api/wsjtx/relay/agent.js\' -OutFile \'%TEMP%\\ohc-relay.js\' } catch { Write-Host $_.Exception.Message; exit 1 }"',
+      'powershell -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri \'' + safeServerURL + '/api/wsjtx/relay/agent.js\' -OutFile \'%TEMP%\\ohc-relay.js\' } catch { Write-Host $_.Exception.Message; exit 1 }"',
       'if errorlevel 1 (',
       '    echo   Failed to download relay agent!',
       '    echo   Check your internet connection and try again.',
@@ -8134,7 +8292,7 @@ app.get('/api/wsjtx/relay/download/:platform', (req, res) => {
       'echo.',
       '',
       ':: Run relay',
-      '%NODE_EXE% "%TEMP%\\ohc-relay.js" --url "' + serverURL + '" --key "' + WSJTX_RELAY_KEY + '" --session "' + sessionId + '"',
+      '%NODE_EXE% "%TEMP%\\ohc-relay.js" --url "' + safeServerURL + '" --key "' + safeRelayKey + '" --session "' + safeSessionId + '"',
       '',
       'echo.',
       'echo   Relay stopped.',
@@ -8440,7 +8598,7 @@ app.get('/api/contest/qsos', (req, res) => {
 });
 
 // API endpoint: ingest contest QSOs (JSON)
-app.post('/api/contest/qsos', (req, res) => {
+app.post('/api/contest/qsos', writeLimiter, requireWriteAuth, (req, res) => {
   const payload = Array.isArray(req.body) ? req.body : [req.body];
   let accepted = 0;
 

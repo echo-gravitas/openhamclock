@@ -125,7 +125,7 @@ export const PropagationPanel = ({ propagation, loading, bandConditions, forcedM
     }
   };
 
-  const bands = ['80m', '40m', '30m', '20m', '17m', '15m', '12m', '11m', '10m'];
+  const bands = ['80m', '40m', '30m', '20m', '17m', '15m', '12m', '10m'];
   const viewModeLabels = {
     chart: t('propagation.view.chart'),
     bars: t('propagation.view.bars'),

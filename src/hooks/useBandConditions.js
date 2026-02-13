@@ -11,7 +11,7 @@ const BAND_RANGE_MAP = {
   '80m-40m': ['80m', '60m', '40m'],
   '30m-20m': ['30m', '20m'],
   '17m-15m': ['17m', '15m'],
-  '12m-10m': ['12m', '11m', '10m']
+  '12m-10m': ['12m', '10m']
 };
 
 // Normalize condition strings from N0NBH (they use title case)

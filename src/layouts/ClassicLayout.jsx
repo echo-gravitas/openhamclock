@@ -291,44 +291,46 @@ export default function ClassicLayout(props) {
           units={config.units}
           />
 
-          {/* Settings button overlay */}
-          <button
-            onClick={() => setShowSettings(true)}
-            style={{
-              position: 'absolute',
-              top: '10px',
-              left: '10px',
-              background: 'rgba(0,0,0,0.7)',
-              border: '1px solid #444',
-              color: '#fff',
-              padding: '6px 12px',
-              fontSize: '12px',
-              cursor: 'pointer',
-              borderRadius: '4px'
-            }}
-          >
-            {t('app.settings')}
-          </button>
+          {/* Map overlay buttons — bottom-left to avoid WorldMap's SAT/CALLS buttons at top */}
+          <div style={{
+            position: 'absolute',
+            bottom: '54px',
+            left: '10px',
+            display: 'flex',
+            gap: '6px',
+            zIndex: 1000
+          }}>
+            <button
+              onClick={() => setShowSettings(true)}
+              style={{
+                background: 'rgba(0,0,0,0.7)',
+                border: '1px solid #444',
+                color: '#fff',
+                padding: '6px 12px',
+                fontSize: '12px',
+                cursor: 'pointer',
+                borderRadius: '4px'
+              }}
+            >
+              {t('app.settings')}
+            </button>
 
-          {/* DX Lock button overlay */}
-          <button
-            onClick={handleToggleDxLock}
-            title={dxLocked ? t('app.dxLock.unlockTooltip') : t('app.dxLock.lockTooltip')}
-            style={{
-              position: 'absolute',
-              top: '10px',
-              left: '110px',
-              background: dxLocked ? 'rgba(255,180,0,0.9)' : 'rgba(0,0,0,0.7)',
-              border: '1px solid #444',
-              color: dxLocked ? '#000' : '#fff',
-              padding: '6px 12px',
-              fontSize: '12px',
-              cursor: 'pointer',
-              borderRadius: '4px'
-            }}
-          >
-            {dxLocked ? t('app.dxLock.locked') : t('app.dxLock.unlocked')}
-          </button>
+            <button
+              onClick={handleToggleDxLock}
+              title={dxLocked ? t('app.dxLock.unlockTooltip') : t('app.dxLock.lockTooltip')}
+              style={{
+                background: dxLocked ? 'rgba(255,180,0,0.9)' : 'rgba(0,0,0,0.7)',
+                border: '1px solid #444',
+                color: dxLocked ? '#000' : '#fff',
+                padding: '6px 12px',
+                fontSize: '12px',
+                cursor: 'pointer',
+                borderRadius: '4px'
+              }}
+            >
+              {dxLocked ? t('app.dxLock.locked') : t('app.dxLock.unlocked')}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -530,13 +532,13 @@ export default function ClassicLayout(props) {
             lowMemoryMode={config.lowMemoryMode}
           units={config.units}
           />
-          {/* DX Lock button overlay */}
+          {/* DX Lock button overlay — bottom-left to avoid WorldMap's SAT/CALLS buttons at top */}
           <button
             onClick={handleToggleDxLock}
             title={dxLocked ? t('app.dxLock.unlockTooltip') : t('app.dxLock.lockTooltip')}
             style={{
               position: 'absolute',
-              top: '10px',
+              bottom: '40px',
               left: '10px',
               background: dxLocked ? 'rgba(255,180,0,0.9)' : 'rgba(0,0,0,0.7)',
               border: '1px solid #444',

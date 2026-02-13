@@ -32,8 +32,7 @@ const BANDS = [
   { label: '17m',  freq: 18 },
   { label: '15m',  freq: 21 },
   { label: '12m',  freq: 24 },
-  { label: '10m',  freq: 28 },
-  { label: '6m',   freq: 50 }
+  { label: '10m',  freq: 28 }
 ];
 
 // Reliability to color: red (0%) → yellow (50%) → green (100%)

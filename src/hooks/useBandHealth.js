@@ -17,6 +17,138 @@ const DEFAULT_BANDS = [
 
 const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 
+// --- V2: Mode inference for "other" DX spots (frequency-only, Pi-safe) ---
+//
+// Goals:
+// - Only run when the spot mode is missing/unusable.
+// - Use frequency-only inference (no callsign lookups, no async).
+// - Be conservative and explainable.
+// - Provide a confidence value for potential weighting.
+
+const CONF_HIGH = "high";
+const CONF_MED = "medium";
+
+function freqToMHz(rawFreq) {
+  const f = parseFloat(rawFreq);
+  if (!Number.isFinite(f) || f <= 0) return null;
+  // DX feeds vary: MHz (14.074) or kHz (14074)
+  return f > 1000 ? f / 1000 : f;
+}
+
+// Narrow "digital islands" (center freq) with small tolerance.
+// Tolerance is intentionally small to avoid misclassification.
+const ISLAND_TOL_MHZ = 0.003; // ~3 kHz
+const ISLANDS = [
+  // FT8
+  { mhz: 3.573,  mode: "FT8" },
+  { mhz: 7.074,  mode: "FT8" },
+  { mhz: 10.136, mode: "FT8" },
+  { mhz: 14.074, mode: "FT8" },
+  { mhz: 18.100, mode: "FT8" },
+  { mhz: 21.074, mode: "FT8" },
+  { mhz: 24.915, mode: "FT8" },
+  { mhz: 28.074, mode: "FT8" },
+  // FT4
+  { mhz: 3.575,  mode: "FT4" },
+  { mhz: 7.0475, mode: "FT4" },
+  { mhz: 10.140, mode: "FT4" },
+  { mhz: 14.080, mode: "FT4" },
+  { mhz: 18.104, mode: "FT4" },
+  { mhz: 21.080, mode: "FT4" },
+  { mhz: 24.919, mode: "FT4" },
+  { mhz: 28.080, mode: "FT4" },
+];
+
+function inferModeFromFrequency(rawFreq) {
+  const mhz = freqToMHz(rawFreq);
+  if (!mhz) return null;
+
+  // 1) High-confidence islands
+  for (const isl of ISLANDS) {
+    if (Math.abs(mhz - isl.mhz) <= ISLAND_TOL_MHZ) {
+      return { mode: isl.mode, confidence: CONF_HIGH, inferredBy: "band-plan" };
+    }
+  }
+
+  // 2) Coarse band-plan segments (medium confidence)
+  const band = getBandFromFreq(mhz);
+  if (!band) return null;
+
+  switch (band) {
+    case "160m":
+      if (mhz >= 1.8 && mhz < 1.84) return { mode: "CW", confidence: CONF_MED, inferredBy: "band-plan" };
+      if (mhz >= 1.84 && mhz <= 2.0) return { mode: "SSB", confidence: CONF_MED, inferredBy: "band-plan" };
+      return null;
+
+    case "80m":
+      if (mhz >= 3.5 && mhz < 3.6) return { mode: "CW", confidence: CONF_MED, inferredBy: "band-plan" };
+      if (mhz >= 3.6 && mhz <= 4.0) return { mode: "SSB", confidence: CONF_MED, inferredBy: "band-plan" };
+      return null;
+
+    case "40m":
+      if (mhz >= 7.0 && mhz < 7.05) return { mode: "CW", confidence: CONF_MED, inferredBy: "band-plan" };
+      if (mhz >= 7.05 && mhz <= 7.3) return { mode: "SSB", confidence: CONF_MED, inferredBy: "band-plan" };
+      return null;
+
+    case "30m":
+      // 30m is mixed CW/digital; only islands are high-confidence.
+      if (mhz >= 10.1 && mhz <= 10.15) return { mode: "CW", confidence: CONF_MED, inferredBy: "band-plan" };
+      return null;
+
+    case "20m":
+      if (mhz >= 14.0 && mhz < 14.07) return { mode: "CW", confidence: CONF_MED, inferredBy: "band-plan" };
+      if (mhz >= 14.07 && mhz <= 14.35) return { mode: "SSB", confidence: CONF_MED, inferredBy: "band-plan" };
+      return null;
+
+    case "17m":
+      if (mhz >= 18.068 && mhz < 18.095) return { mode: "CW", confidence: CONF_MED, inferredBy: "band-plan" };
+      if (mhz >= 18.11 && mhz <= 18.168) return { mode: "SSB", confidence: CONF_MED, inferredBy: "band-plan" };
+      // 18.095–18.110 is intentionally left ambiguous (digital/other)
+      return null;
+
+    case "15m":
+      if (mhz >= 21.0 && mhz < 21.07) return { mode: "CW", confidence: CONF_MED, inferredBy: "band-plan" };
+      if (mhz >= 21.07 && mhz <= 21.45) return { mode: "SSB", confidence: CONF_MED, inferredBy: "band-plan" };
+      return null;
+
+    case "12m":
+      if (mhz >= 24.89 && mhz < 24.915) return { mode: "CW", confidence: CONF_MED, inferredBy: "band-plan" };
+      if (mhz >= 24.93 && mhz <= 24.99) return { mode: "SSB", confidence: CONF_MED, inferredBy: "band-plan" };
+      // 24.915–24.93 left ambiguous
+      return null;
+
+    case "10m":
+      if (mhz >= 28.0 && mhz < 28.07) return { mode: "CW", confidence: CONF_MED, inferredBy: "band-plan" };
+      if (mhz >= 28.3 && mhz <= 29.7) return { mode: "SSB", confidence: CONF_MED, inferredBy: "band-plan" };
+      // 28.07–28.3 left ambiguous (digital/other)
+      return null;
+
+    default:
+      // VHF/UHF and 60m: too region/usage-dependent; do not infer in V2.
+      return null;
+  }
+}
+
+/**
+ * classifySpotMode
+ * Returns the best-known mode for a spot:
+ * - explicit mode (from comment) if present
+ * - otherwise inferred mode (frequency-only) if high/medium confidence
+ */
+export function classifySpotMode(spot) {
+  const explicit = normalizeMode(detectMode(spot?.comment) || null);
+  if (explicit && explicit !== "ALL") {
+    return { mode: explicit, inferred: false, confidence: null, inferredBy: null };
+  }
+
+  const inferred = inferModeFromFrequency(spot?.freq);
+  if (inferred?.mode) {
+    return { mode: inferred.mode, inferred: true, confidence: inferred.confidence, inferredBy: inferred.inferredBy };
+  }
+
+  return { mode: null, inferred: false, confidence: null, inferredBy: null };
+}
+
 function normalizeMode(mode) {
   if (!mode) return "ALL";
   const m = String(mode).toUpperCase();
@@ -87,20 +219,34 @@ export function useBandHealth(dxSpots = [], options = {}) {
 
     const desiredMode = normalizeMode(mode);
 
-    // Filter to window + mode
-    const filtered = (dxSpots || []).filter(s => {
+    // Filter to window + mode.
+    // V2: If the spot doesn't declare a mode, attempt a conservative frequency-based inference.
+    // We keep the filtering logic simple and deterministic.
+    const filtered = [];
+    for (const s of dxSpots || []) {
       const ts = s?.timestamp || now;
-      if (ts < cutoff) return false;
+      if (ts < cutoff) continue;
 
-      if (desiredMode === "ALL") return true;
+      if (desiredMode === "ALL") {
+        filtered.push({ spot: s, weight: 1, inferred: false });
+        continue;
+      }
 
-      const m = detectMode(s?.comment) || null;
-      return m === desiredMode;
-    });
+      const cls = classifySpotMode(s);
+      if (!cls?.mode) continue;
+      if (cls.mode !== desiredMode) continue;
+
+      // Optional weighting to reduce inflation from broad, medium-confidence segments.
+      // - HIGH confidence (digital islands) => full weight
+      // - MED confidence (segments) => half weight
+      const weight = cls.inferred ? (cls.confidence === CONF_MED ? 0.5 : 1) : 1;
+      filtered.push({ spot: s, weight, inferred: !!cls.inferred });
+    }
 
     // Group spots by band
     const byBand = new Map();
-    for (const s of filtered) {
+    for (const item of filtered) {
+      const s = item.spot;
       const f = parseFloat(s?.freq); // kHz or MHz (getBandFromFreq handles both)
       if (!Number.isFinite(f)) continue;
 
@@ -108,30 +254,41 @@ export function useBandHealth(dxSpots = [], options = {}) {
       if (!band || !bands.includes(band)) continue;
 
       if (!byBand.has(band)) byBand.set(band, []);
-      byBand.get(band).push(s);
+      byBand.get(band).push(item);
     }
 
     // Build result for each band (always include all bands, even if 0)
     const results = bands.map(band => {
-      const spots = byBand.get(band) || [];
-      const count = spots.length;
+      const items = byBand.get(band) || [];
+      const rawCount = items.length;
+
+      let scoreCount = 0;
+      let inferredCount = 0;
+      const spots = [];
+      for (const it of items) {
+        scoreCount += Number(it.weight) || 0;
+        if (it.inferred) inferredCount += 1;
+        spots.push(it.spot);
+      }
 
       const uniquesSet = new Set();
       for (const s of spots) {
         if (s?.call) uniquesSet.add(String(s.call).toUpperCase());
       }
       const uniques = uniquesSet.size;
-      const diversity = count > 0 ? uniques / count : 0;
+      const diversity = rawCount > 0 ? uniques / rawCount : 0;
 
       const trend = computeTrend(spots, now, windowMs);
-      const baseLevel = baseLevelFromCount(count);
+      const baseLevel = baseLevelFromCount(scoreCount);
       const level = scoreToLevel(baseLevel, { diversity, trend });
 
       return {
         band,
         mode: desiredMode,
         windowMinutes: Math.round(windowMs / 60000),
-        count,
+        count: rawCount,
+        scoreCount: Number.isFinite(scoreCount) ? scoreCount : rawCount,
+        inferredCount,
         uniques,
         diversity: Number.isFinite(diversity) ? diversity : 0,
         trend,

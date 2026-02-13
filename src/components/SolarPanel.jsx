@@ -48,6 +48,28 @@ export const SolarPanel = ({ solarIndices, forcedMode }) => {
   });
   const [xrayData, setXrayData] = useState(null);
   const [xrayLoading, setXrayLoading] = useState(false);
+  const [imageError, setImageError] = useState(false);
+
+  // Refresh solar image every 15 minutes and retry on error
+  const [imageTimestamp, setImageTimestamp] = useState(() => Math.floor(Date.now() / 900000) * 900000);
+  useEffect(() => {
+    // Refresh every 15 minutes to get latest SDO image
+    const interval = setInterval(() => {
+      setImageTimestamp(Math.floor(Date.now() / 900000) * 900000);
+      setImageError(false); // Reset error state on refresh
+    }, 15 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Retry failed image loads after 30 seconds
+  useEffect(() => {
+    if (!imageError || mode !== 'image') return;
+    const retry = setTimeout(() => {
+      setImageTimestamp(Date.now()); // Force new URL to bypass cache
+      setImageError(false);
+    }, 30000);
+    return () => clearTimeout(retry);
+  }, [imageError, mode]);
   
   const cycleMode = () => {
     const nextIdx = (MODES.indexOf(mode) + 1) % MODES.length;
@@ -90,8 +112,7 @@ export const SolarPanel = ({ solarIndices, forcedMode }) => {
     'HMIIC': { name: 'HMI Int', desc: 'Visible' }
   };
   
-  const timestamp = Math.floor(Date.now() / 900000) * 900000;
-  const imageUrl = `https://sdo.gsfc.nasa.gov/assets/img/latest/latest_256_${imageType}.jpg?t=${timestamp}`;
+  const imageUrl = `https://sdo.gsfc.nasa.gov/assets/img/latest/latest_256_${imageType}.jpg?t=${imageTimestamp}`;
   
   const getKpColor = (value) => {
     if (value >= 7) return '#ff0000';
@@ -428,7 +449,7 @@ export const SolarPanel = ({ solarIndices, forcedMode }) => {
           {mode === 'image' && (
             <select 
               value={imageType}
-              onChange={(e) => { setImageType(e.target.value); try { localStorage.setItem('openhamclock_solarImageType', e.target.value); } catch {} }}
+              onChange={(e) => { setImageType(e.target.value); setImageError(false); try { localStorage.setItem('openhamclock_solarImageType', e.target.value); } catch {} }}
               onClick={(e) => e.stopPropagation()}
               style={{
                 background: 'var(--bg-tertiary)',
@@ -671,22 +692,28 @@ export const SolarPanel = ({ solarIndices, forcedMode }) => {
           minHeight: 0,
           overflow: 'hidden'
         }}>
-          <img
-            src={imageUrl}
-            alt="SDO Solar Image"
-            style={{
-              maxHeight: '100%',
-              maxWidth: '100%',
-              width: 'auto',
-              height: 'auto',
-              objectFit: 'contain',
-              borderRadius: '50%',
-              border: '2px solid var(--border-color)'
-            }}
-            onError={(e) => {
-              e.target.style.display = 'none';
-            }}
-          />
+          {imageError ? (
+            <div style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '20px' }}>
+              <div style={{ fontSize: '24px', marginBottom: '4px' }}>☀️</div>
+              <div style={{ fontSize: '10px' }}>Retrying...</div>
+            </div>
+          ) : (
+            <img
+              src={imageUrl}
+              alt="SDO Solar Image"
+              style={{
+                maxHeight: '100%',
+                maxWidth: '100%',
+                width: 'auto',
+                height: 'auto',
+                objectFit: 'contain',
+                borderRadius: '50%',
+                border: '2px solid var(--border-color)'
+              }}
+              onError={() => setImageError(true)}
+              onLoad={() => setImageError(false)}
+            />
+          )}
           <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px', flexShrink: 0 }}>
             SDO/AIA • Live from NASA
           </div>
