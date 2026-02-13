@@ -4253,7 +4253,10 @@ app.get('/api/rbn/spots', async (req, res) => {
       const response = await fetch(`http://localhost:${PORT}/api/callsign/${skimmerCall}`);
       if (response.ok) {
         const locationData = await response.json();
+        // Generate grid from HAMQTH lat/lon for display purposes
         const grid = latLonToGrid(locationData.lat, locationData.lon);
+        
+        console.log(`[RBN] Enriched ${skimmerCall} with HAMQTH data: lat=${locationData.lat}, lon=${locationData.lon}, grid=${grid}`);
         
         const location = {
           callsign: skimmerCall,
@@ -4273,9 +4276,11 @@ app.get('/api/rbn/spots', async (req, res) => {
           skimmerLon: locationData.lon,
           skimmerCountry: locationData.country
         };
+      } else {
+        console.warn(`[RBN] Failed to lookup location for ${skimmerCall}: HTTP ${response.status}`);
       }
     } catch (err) {
-      // Silent fail - return spot without location
+      console.warn(`[RBN] Error looking up ${skimmerCall}: ${err.message}`);
     }
     
     // Return spot as-is if lookup failed
@@ -4308,11 +4313,15 @@ app.get('/api/rbn/location/:callsign', async (req, res) => {
   }
   
   try {
-    // Look up via HamQTH
+    // Look up via HamQTH to get authoritative lat/lon
     const response = await fetch(`http://localhost:${PORT}/api/callsign/${callsign}`);
     if (response.ok) {
       const locationData = await response.json();
+      // Generate grid from HAMQTH lat/lon for display purposes only
+      // The lat/lon from HAMQTH should always be used for marker placement
       const grid = latLonToGrid(locationData.lat, locationData.lon);
+      
+      console.log(`[RBN] Looked up ${callsign} via HAMQTH: lat=${locationData.lat}, lon=${locationData.lon}, grid=${grid}`);
       
       const result = {
         callsign: callsign,
