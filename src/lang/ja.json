@@ -200,6 +200,8 @@
   "app.dxLocation.beamDir": "ビーム方向:",
   "app.dxLocation.sp": "SP:",
   "app.dxLocation.lp": "LP:",
+  "app.dxNews.pauseTooltip": "クリックして一時停止",
+  "app.dxNews.resumeTooltip": "クリックして再開",
   "dxClusterPanel.title": "DX クラスター",
   "dxClusterPanel.live": "ライブ",
   "dxClusterPanel.filterTooltip": "バンド・モード・大陸でフィルター",

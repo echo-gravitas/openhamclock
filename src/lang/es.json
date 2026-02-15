@@ -58,6 +58,8 @@
   "app.dxLocation.beamDir": "Dirección del haz:",
   "app.dxLocation.sp": "SP:",
   "app.dxLocation.lp": "LP:",
+  "app.dxNews.pauseTooltip": "Clic para pausar",
+  "app.dxNews.resumeTooltip": "Clic para reanudar",
   "app.update.confirm": "Iniciar la actualización ahora? El servidor se reiniciará al finalizar.",
   "app.update.failedToStart": "No se pudo iniciar la actualización",
   "app.update.started": "Actualización iniciada. La página se recargará después de que el servidor se reinicie.",

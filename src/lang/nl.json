@@ -124,6 +124,8 @@
   "app.dxLocation.beamDir": "Straalrichting:",
   "app.dxLocation.sp": "SP:",
   "app.dxLocation.lp": "LP:",
+  "app.dxNews.pauseTooltip": "Klik om te pauzeren",
+  "app.dxNews.resumeTooltip": "Klik om te hervatten",
   "dxClusterPanel.title": "DX-CLUSTER",
   "dxClusterPanel.live": "LIVE",
   "dxClusterPanel.filterTooltip": "DX-spots filteren op band, mode of continent",
