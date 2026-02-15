@@ -141,6 +141,8 @@ export const DockableApp = ({
   const toggleDXLabelsEff = useInternalMapLayers ? internalMap.toggleDXLabels : toggleDXLabels;
   const togglePOTAEff = useInternalMapLayers ? internalMap.togglePOTA : togglePOTA;
   const togglePOTALabelsEff = useInternalMapLayers ? internalMap.togglePOTALabels : togglePOTALabels;
+  const toggleWWFFEff = useInternalMapLayers ? internalMap.toggleWWFF : toggleWWFF;
+  const toggleWWFFLabelsEff = useInternalMapLayers ? internalMap.toggleWWFFLabels : toggleWWFFLabels;
   const toggleSatellitesEff = useInternalMapLayers ? internalMap.toggleSatellites : toggleSatellites;
   const togglePSKReporterEff = useInternalMapLayers ? internalMap.togglePSKReporter : togglePSKReporter;
   const toggleWSJTXEff = useInternalMapLayers ? internalMap.toggleWSJTX : toggleWSJTX;
@@ -368,6 +370,9 @@ export const DockableApp = ({
         showPOTA={mapLayersEff.showPOTA}
         showPOTALabels={mapLayersEff.showPOTALabels}
 
+        showWWFF={mapLayersEff.showWWFF}
+        showWWFFLabels={mapLayersEff.showWWFFLabels}
+
         showSOTA={mapLayersEff.showSOTA}
 
         showSatellites={mapLayersEff.showSatellites}
@@ -535,11 +540,17 @@ export const DockableApp = ({
         break;
       
       case 'wwff':
-        content = <WWFFPanel data={wwffSpots.data} loading={wwffSpots.loading} showOnMap={mapLayers.showWWFF} onToggleMap={toggleWWFF} />;
-        break;
-      
-      case 'wwff':
-        content = <WWFFPanel data={wwffSpots.data} loading={wwffSpots.loading} showOnMap={mapLayers.showWWFF} onToggleMap={toggleWWFF} />;
+        content = (
+          <WWFFPanel
+            data={wwffSpots.data}
+            loading={wwffSpots.loading}
+            showOnMap={mapLayersEff.showWWFF}
+            onToggleMap={toggleWWFFEff}
+
+            showLabelsOnMap={mapLayersEff.showWWFFLabels}
+            onToggleLabelsOnMap={toggleWWFFLabelsEff}
+          />
+        );
         break;
 
       case 'sota':

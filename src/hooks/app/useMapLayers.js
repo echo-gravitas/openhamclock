@@ -7,6 +7,8 @@ export default function useMapLayers() {
     showDXLabels: true,
     showPOTA: true,
     showPOTALabels: true,
+    showWWFF: true,
+    showWWFFLabels:true,
     showSOTA: true,
     showSatellites: false,
     showPSKReporter: true,
@@ -51,6 +53,7 @@ export default function useMapLayers() {
   const togglePOTA = useCallback(() => setMapLayers(prev => ({ ...prev, showPOTA: !prev.showPOTA })), []);
   const togglePOTALabels = useCallback(() => setMapLayers(prev => ({ ...prev, showPOTALabels: !prev.showPOTALabels })), []);
   const toggleWWFF = useCallback(() => setMapLayers(prev => ({ ...prev, showWWFF: !prev.showWWFF })), []);
+  const toggleWWFFLabels = useCallback(() => setMapLayers(prev => ({ ...prev, showWWFFLabels: !prev.showWWFFLabels })), []);
   const toggleSOTA = useCallback(() => setMapLayers(prev => ({ ...prev, showSOTA: !prev.showSOTA })), []);
   const toggleSatellites = useCallback(() => setMapLayers(prev => ({ ...prev, showSatellites: !prev.showSatellites })), []);
   const togglePSKReporter = useCallback(() => setMapLayers(prev => ({ ...prev, showPSKReporter: !prev.showPSKReporter })), []);
@@ -66,6 +69,7 @@ export default function useMapLayers() {
     togglePOTA,
     togglePOTALabels,
     toggleWWFF,
+    toggleWWFFLabels,
     toggleSOTA,
     toggleSatellites,
     togglePSKReporter,
