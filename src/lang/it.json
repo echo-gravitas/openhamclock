@@ -1,5 +1,8 @@
 {
   "cancel": "Annulla",
+  "contest.panel.time.live.hoursMinutes": "{{hours}}h {{minutes}}m left",
+  "contest.panel.time.live.minutes": "{{minutes}}m left",
+  "contest.panel.time.startsIn": "Starts in {{hours}}h",
   "station.settings.language": "Lingua",
   "station.settings.language.en": "English",
   "station.settings.language.fr": "Français",
@@ -28,6 +31,9 @@
   "station.settings.layout.classic.describe": "→ Layout stile HamClock originale",
   "station.settings.layout.modern": "Moderno",
   "station.settings.layout.modern.describe": "→ Layout moderno con griglia reattiva",
+  "station.settings.mouseZoom": "Sensibilità della rotellina del mouse",
+  "station.settings.mouseZoom.describeMin": "Meno",
+  "station.settings.mouseZoom.describeMax": "Più",
   "station.settings.latitude": "Latitudine",
   "station.settings.locator": "Locatore (o inserisci Lat/Lon sotto)",
   "station.settings.longitude": "Longitudine",

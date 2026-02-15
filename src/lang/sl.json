@@ -1,5 +1,8 @@
 {
   "cancel": "Prekliči",
+  "contest.panel.time.live.hoursMinutes": "{{hours}}h {{minutes}}m left",
+  "contest.panel.time.live.minutes": "{{minutes}}m left",
+  "contest.panel.time.startsIn": "Starts in {{hours}}h",
   "station.settings.language": "Jezik",
   "station.settings.language.en": "English",
   "station.settings.language.fr": "Français",
@@ -33,6 +36,9 @@
   "station.settings.layout.tablet.describe": "→ Optimizirano za 7–10\" širokozaslonske zaslone (16:9)",
   "station.settings.layout.compact": "Kompaktna",
   "station.settings.layout.compact.describe": "→ Postavitev za zaslone 4:3 in manjše",
+  "station.settings.mouseZoom": "Občutljivost miškinega kolesca",
+  "station.settings.mouseZoom.describeMin": "Manj",
+  "station.settings.mouseZoom.describeMax": "Več",
   "station.settings.latitude": "Zemljepisna širina",
   "station.settings.locator": "Lokator (ali vnesite širino/dolžino spodaj)",
   "station.settings.longitude": "Zemljepisna dolžina",

@@ -40,6 +40,7 @@ import useFullscreen from './hooks/app/useFullscreen';
 import useResponsiveScale from './hooks/app/useResponsiveScale';
 import useLocalInstall from './hooks/app/useLocalInstall';
 import useVersionCheck from './hooks/app/useVersionCheck';
+import WhatsNew from './components/WhatsNew.jsx';
 
 const App = () => {
   const { t } = useTranslation();
@@ -354,6 +355,7 @@ const App = () => {
         isOpen={showPSKFilters}
         onClose={() => setShowPSKFilters(false)}
       />
+      <WhatsNew />
     </div>
   );
 };

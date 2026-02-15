@@ -3,6 +3,7 @@ node_modules/
 
 # Build outputs
 dist/
+dist-electron/
 build/
 out/
 
@@ -30,6 +31,7 @@ coverage/
 .env.local
 .env.*.local
 *.env
+.qrz-credentials
 
 # Editor directories and files
 .idea/
@@ -87,3 +89,6 @@ start.sh
 stop.sh
 restart.sh
 status.sh
+-e 
+# Self-hosted vendor assets (downloaded by scripts/vendor-download.sh)
+public/vendor/

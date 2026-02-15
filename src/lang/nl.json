@@ -1,5 +1,8 @@
 {
   "cancel": "Annuleer",
+  "contest.panel.time.live.hoursMinutes": "{{hours}}h {{minutes}}m left",
+  "contest.panel.time.live.minutes": "{{minutes}}m left",
+  "contest.panel.time.startsIn": "Starts in {{hours}}h",
   "station.settings.language": "Taal",
   "station.settings.language.en": "Engels",
   "station.settings.language.fr": "Frans",
@@ -28,6 +31,9 @@
   "station.settings.layout.classic.describe": "→ Original HamClock-style layout",
   "station.settings.layout.modern": "Modern",
   "station.settings.layout.modern.describe": "→ Modern responsive grid layout",
+  "station.settings.mouseZoom": "Gevoeligheid van het muiswiel",
+  "station.settings.mouseZoom.describeMin": "Minder",
+  "station.settings.mouseZoom.describeMax": "Meer",
   "station.settings.latitude": "Latitude",
   "station.settings.locator": "Grid Square (or enter Lat/Lon below)",
   "station.settings.longitude": "Longitude",
