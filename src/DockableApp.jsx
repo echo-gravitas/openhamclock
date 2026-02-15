@@ -386,6 +386,7 @@ export const DockableApp = ({
         callsign={config.callsign}
         lowMemoryMode={config.lowMemoryMode}
         units={config.units}
+        mouseZoom={config.mouseZoom}
       />
     </div>
   );

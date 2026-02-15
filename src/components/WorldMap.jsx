@@ -63,6 +63,7 @@ export const WorldMap = ({
   hideOverlays,
   lowMemoryMode = false,
   units = 'imperial',
+  mouseZoom,
   showRotatorBearing = false,
   rotatorAzimuth = null,
   rotatorLastGoodAzimuth = null,
@@ -138,6 +139,17 @@ export const WorldMap = ({
   };
   const storedSettings = getStoredMapSettings();
   const [mapStyle, setMapStyle] = useState(storedSettings.mapStyle || 'dark');
+
+  const getScaledZoomLevel = (inverseMultiplier) => {
+    // Ensure the input stays within 1–100
+    const clamped = Math.min(Math.max(inverseMultiplier, 1), 100);
+
+    // Normalize the input value
+    const normalized = (100 - clamped) / 99;
+
+    // Scale to range 50–250. Leaflet's default is 60. Smaller numbers zoom faster.
+    return Math.round(50 + normalized * 200);
+  }
 
   // NASA GIBS Night Lights (VIIRS)
   const nightUrl = 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_CityLights_2012/default/2012-03-12/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpg';
@@ -233,10 +245,11 @@ export const WorldMap = ({
         ...existing,
         mapStyle,
         center: mapView.center,
-        zoom: mapView.zoom
+        zoom: mapView.zoom,
+        wheelPxPerZoomLevel: getScaledZoomLevel(mouseZoom)
       }));
     } catch (e) { console.error('Failed to save map settings:', e); }
-  }, [mapStyle, mapView]);
+  }, [mapStyle, mapView, mouseZoom]);
 
   // Initialize map
   useEffect(() => {
@@ -258,7 +271,7 @@ export const WorldMap = ({
       zoomControl: true,
       zoomSnap: 0.1,
       zoomDelta: 0.25,
-      wheelPxPerZoomLevel: 200,
+      wheelPxPerZoomLevel: getScaledZoomLevel(mouseZoom),
       maxBounds: [[-90, -Infinity], [90, Infinity]],
       maxBoundsViscosity: 0.8
     });
@@ -369,6 +382,12 @@ export const WorldMap = ({
       mapInstanceRef.current = null;
     };
   }, []); // Empty dependency array for initialization
+
+  // Update the value for how many scroll pixels count as a zoom level
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    mapInstanceRef.current.options.wheelPxPerZoomLevel = getScaledZoomLevel(mouseZoom);
+  }, [mouseZoom]);
 
   // Apply map lock — disable all navigation interactions while keeping click-through
   useEffect(() => {
