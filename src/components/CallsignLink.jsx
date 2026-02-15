@@ -9,6 +9,23 @@
  */
 import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 
+// ── Extract base callsign from decorated/portable calls ──
+// 5Z4/OZ6ABL → OZ6ABL, UA1TAN/M → UA1TAN, W1ABC/6 → W1ABC
+// Picks the segment that looks most like a home callsign.
+const MODIFIERS = new Set(['M','P','QRP','MM','AM','R','T','B','BCN','LH','A','E','J','AG','AE','KT']);
+function extractBaseCall(raw) {
+  if (!raw || !raw.includes('/')) return raw || '';
+  const parts = raw.toUpperCase().split('/');
+  const candidates = parts.filter(p => p && !MODIFIERS.has(p) && !/^\d$/.test(p));
+  if (candidates.length === 0) return parts[0] || raw;
+  if (candidates.length === 1) return candidates[0];
+  const pat = /^[A-Z]{1,3}\d{1,4}[A-Z]{1,4}$/;
+  const full = candidates.filter(c => pat.test(c));
+  if (full.length === 1) return full[0];
+  candidates.sort((a, b) => b.length - a.length);
+  return candidates[0];
+}
+
 // ── Context for the global QRZ toggle ──
 const QRZContext = createContext({ enabled: true, toggle: () => {} });
 
@@ -68,8 +85,8 @@ export default function CallsignLink({
 
   if (!call) return children || null;
 
-  // Strip portable suffixes for QRZ lookup (W1ABC/P → W1ABC)
-  const baseCall = call.replace(/\/[A-Z0-9]{1,3}$/i, '');
+  // Strip portable suffixes and prefixes for QRZ lookup (5Z4/OZ6ABL → OZ6ABL, UA1TAN/M → UA1TAN)
+  const baseCall = extractBaseCall(call);
 
   const handleClick = (e) => {
     if (!enabled) return;
@@ -117,7 +134,7 @@ export function setupMapQRZHandler() {
     
     const call = el.getAttribute('data-qrz-call');
     if (call) {
-      const baseCall = call.replace(/\/[A-Z0-9]{1,3}$/i, '');
+      const baseCall = extractBaseCall(call);
       window.open(`https://www.qrz.com/db/${encodeURIComponent(baseCall)}`, '_blank', 'noopener,noreferrer');
     }
   });

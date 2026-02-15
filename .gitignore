@@ -4,6 +4,7 @@ package-lock.json
 
 # Build outputs
 dist/
+dist-electron/
 build/
 out/
 
@@ -31,6 +32,7 @@ coverage/
 .env.local
 .env.*.local
 *.env
+.qrz-credentials
 
 # Editor directories and files
 .idea/

@@ -53,7 +53,8 @@ export const WorldMap = ({
   showDXPaths, 
   showDXLabels, 
   onToggleDXLabels, 
-  showPOTA, 
+  showPOTA,
+  showPOTALabels = true,
   showWWFF,
   showSOTA,
   showPSKReporter,
@@ -63,7 +64,14 @@ export const WorldMap = ({
   showDXNews = true,
   hideOverlays,
   lowMemoryMode = false,
-  units = 'imperial'
+  units = 'imperial',
+  mouseZoom,
+  showRotatorBearing = false,
+  rotatorAzimuth = null,
+  rotatorLastGoodAzimuth = null,
+  rotatorIsStale = false,
+  rotatorControlEnabled,
+  onRotatorTurnRequest
 }) => {
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
@@ -84,15 +92,20 @@ export const WorldMap = ({
   const satTracksRef = useRef([]);
   const pskMarkersRef = useRef([]);
   const wsjtxMarkersRef = useRef([]);
-  const countriesLayerRef = useRef(null);
+  const countriesLayerRef = useRef([]);
   const dxLockedRef = useRef(dxLocked);
+  const rotatorLineRef = useRef(null);
+  const rotatorGlowRef = useRef(null);
+  const rotatorTurnRef = useRef(onRotatorTurnRequest);
+  const rotatorEnabledRef = useRef(rotatorControlEnabled);
+  const deRef = useRef(deLocation);
 
   // Calculate grid locator from DE location for plugins
   const deLocator = useMemo(() => {
     if (!deLocation?.lat || !deLocation?.lon) return '';
     return calculateGridSquare(deLocation.lat, deLocation.lon);
   }, [deLocation?.lat, deLocation?.lon]);
-
+  
   // Expose DE location to window for plugins (e.g., RBN)
   useEffect(() => {
     if (deLocation?.lat && deLocation?.lon) {
@@ -130,13 +143,22 @@ export const WorldMap = ({
   const storedSettings = getStoredMapSettings();
   const [mapStyle, setMapStyle] = useState(storedSettings.mapStyle || 'dark');
 
+  const getScaledZoomLevel = (inverseMultiplier) => {
+    // Ensure the input stays within 1–100
+    const clamped = Math.min(Math.max(inverseMultiplier, 1), 100);
+
+    // Normalize the input value
+    const normalized = (100 - clamped) / 99;
+
+    // Scale to range 50–250. Leaflet's default is 60. Smaller numbers zoom faster.
+    return Math.round(50 + normalized * 200);
+  }
+
   // NASA GIBS Night Lights (VIIRS)
   const nightUrl = 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_CityLights_2012/default/2012-03-12/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpg';
 	
   // GIBS MODIS CODE
   const [gibsOffset, setGibsOffset] = useState(0); 
-  // City lights intensity (range 0 to 1)
-  // const [nightIntensity, setNightIntensity] = useState(0.8);
   
   const getGibsUrl = (days) => {
     const date = new Date(Date.now() - (days * 24 + 12) * 60 * 60 * 1000);
@@ -155,6 +177,69 @@ export const WorldMap = ({
     try { return localStorage.getItem('openhamclock_mapLocked') === 'true'; } catch { return false; }
   });
   
+  const destinationPoint = (latDeg, lonDeg, bearingDeg, distanceDeg) => {
+    const toRad = (d) => (d * Math.PI) / 180;
+    const toDeg = (r) => (r * 180) / Math.PI;
+
+    const φ1 = toRad(latDeg);
+    const λ1 = toRad(lonDeg);
+    const θ = toRad(bearingDeg);
+    const δ = toRad(distanceDeg);
+
+    const sinφ1 = Math.sin(φ1), cosφ1 = Math.cos(φ1);
+    const sinδ = Math.sin(δ), cosδ = Math.cos(δ);
+
+    const sinφ2 = sinφ1 * cosδ + cosφ1 * sinδ * Math.cos(θ);
+    const φ2 = Math.asin(sinφ2);
+
+    const y = Math.sin(θ) * sinδ * cosφ1;
+    const x = cosδ - sinφ1 * sinφ2;
+    const λ2 = λ1 + Math.atan2(y, x);
+
+    let lon2 = ((toDeg(λ2) + 540) % 360) - 180;
+    let lat2 = toDeg(φ2);
+
+    return { lat: lat2, lon: lon2 };
+  };
+
+  const buildBearingPoints = (lat, lon, azDeg, maxDeg = 90, stepDeg = 2) => {
+    const pts = [];
+    for (let d = 0; d <= maxDeg; d += stepDeg) {
+      const p = destinationPoint(lat, lon, azDeg, d);
+      pts.push([p.lat, p.lon]);
+    }
+    return pts;
+  };
+
+  const initialBearingDeg = (lat1, lon1, lat2, lon2) => {
+    const toRad = (d) => (d * Math.PI) / 180;
+    const toDeg = (r) => (r * 180) / Math.PI;
+
+    const φ1 = toRad(lat1);
+    const φ2 = toRad(lat2);
+    const Δλ = toRad(lon2 - lon1);
+
+    const y = Math.sin(Δλ) * Math.cos(φ2);
+    const x =
+      Math.cos(φ1) * Math.sin(φ2) -
+      Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+
+    const θ = Math.atan2(y, x);
+    return ((toDeg(θ) + 360) % 360);
+  };
+
+  useEffect(() => {
+    rotatorTurnRef.current = onRotatorTurnRequest;
+  }, [onRotatorTurnRequest]);
+
+  useEffect(() => {
+    rotatorEnabledRef.current = rotatorControlEnabled;
+  }, [rotatorControlEnabled]);
+
+  useEffect(() => {
+    deRef.current = deLocation;
+  }, [deLocation]);
+
   // Save map settings to localStorage when changed (merge, don't overwrite)
   useEffect(() => {
     try {
@@ -163,96 +248,117 @@ export const WorldMap = ({
         ...existing,
         mapStyle,
         center: mapView.center,
-        zoom: mapView.zoom
+        zoom: mapView.zoom,
+        wheelPxPerZoomLevel: getScaledZoomLevel(mouseZoom)
       }));
     } catch (e) { console.error('Failed to save map settings:', e); }
-  }, [mapStyle, mapView]);
+  }, [mapStyle, mapView, mouseZoom]);
 
   // Initialize map
   useEffect(() => {
-	// If map is already initialized, don't do it again
-	  if (!mapRef.current || mapInstanceRef.current) return;
-	  
-	  const L = window.L;
-	  if (typeof L === 'undefined') {
-		console.error('Leaflet not loaded');
-		return;
-	  }
+    // If map is already initialized, don't do it again
+    if (!mapRef.current || mapInstanceRef.current) return;
+    
+    const L = window.L;
+    if (typeof L === 'undefined') {
+      console.error('Leaflet not loaded');
+      return;
+    }
 
-	  const map = L.map(mapRef.current, {
-		center: mapView.center,
-		zoom: mapView.zoom,
-		minZoom: 1,
-		maxZoom: 18,
-		worldCopyJump: true,
-		zoomControl: true,
-		zoomSnap: 0.1,
-		zoomDelta: 0.25,
-		wheelPxPerZoomLevel: 200,
-		maxBounds: [[-90, -Infinity], [90, Infinity]],
-		maxBoundsViscosity: 0.8
-	  });
-
-	  // --- night pane ---
-	  map.createPane('nightPane');
-	  const nightPane = map.getPane('nightPane');
-	  nightPane.style.zIndex = 650; // Keep it on the very top
-	  nightPane.style.pointerEvents = 'none'; 
-	  nightPane.id = 'night-lights-pane'; // Links to CSS for 'screen' blending
-
-	  // Initial tile layer (Base Day Map)
-	  tileLayerRef.current = L.tileLayer(MAP_STYLES[mapStyle].url, {
-		attribution: MAP_STYLES[mapStyle].attribution,
-		noWrap: false,
-		crossOrigin: 'anonymous'
-	  }).addTo(map);
-
-	  // Day/night terminator
-	  terminatorRef.current = createTerminator({
-		resolution: 2,
-		fillOpacity: 0.1, 
-		fillColor: '#000010',
-		color: '#ffaa00',
-		weight: 2,
-		dashArray: '5, 5',
-		wrap: false
-	  }).addTo(map);
-
-	  // Refresh terminator immediately to set initial position
-	  setTimeout(() => {
-		if (terminatorRef.current) {
-		  terminatorRef.current.setTime();
-		  // Ensure the mask updates immediately after the first path is generated
-		  const path = terminatorRef.current.getElement();
-		  if (path) {
-			path.classList.add('terminator-path');
-		  }
-		}
-	  }, 100);
-
-	  const terminatorInterval = setInterval(() => {
-		if (terminatorRef.current) {
-		  terminatorRef.current.setTime();
-		  const path = terminatorRef.current.getElement();
-		  if (path) {
-			path.classList.add('terminator-path');
-		  }
-		}
-	  }, 60000);
-
-    map.on('click', (e) => {
-      if (onDXChange && !dxLockedRef.current) {
-        let lon = e.latlng.lng;
-        while (lon > 180) lon -= 360;
-        while (lon < -180) lon += 360;
-        onDXChange({ lat: e.latlng.lat, lon });
-      }
+    const map = L.map(mapRef.current, {
+      center: mapView.center,
+      zoom: mapView.zoom,
+      minZoom: 1,
+      maxZoom: 18,
+      worldCopyJump: true,
+      zoomControl: true,
+      zoomSnap: 0.1,
+      zoomDelta: 0.25,
+      wheelPxPerZoomLevel: getScaledZoomLevel(mouseZoom),
+      maxBounds: [[-90, -Infinity], [90, Infinity]],
+      maxBoundsViscosity: 0.8
     });
+
+    // --- night pane ---
+    map.createPane('nightPane');
+    const nightPane = map.getPane('nightPane');
+    nightPane.style.zIndex = 650;
+    nightPane.style.pointerEvents = 'none'; 
+    nightPane.id = 'night-lights-pane';
+
+    // Initial tile layer (Base Day Map)
+    tileLayerRef.current = L.tileLayer(MAP_STYLES[mapStyle].url, {
+      attribution: MAP_STYLES[mapStyle].attribution,
+      noWrap: false,
+      crossOrigin: 'anonymous'
+    }).addTo(map);
+
+    // Day/night terminator
+    terminatorRef.current = createTerminator({
+      resolution: 2,
+      fillOpacity: 0.1, 
+      fillColor: '#000010',
+      color: '#ffaa00',
+      weight: 2,
+      dashArray: '5, 5',
+      wrap: false
+    }).addTo(map);
+
+    // Refresh terminator immediately to set initial position
+    setTimeout(() => {
+      if (terminatorRef.current) {
+        terminatorRef.current.setTime();
+        const path = terminatorRef.current.getElement();
+        if (path) {
+          path.classList.add('terminator-path');
+        }
+      }
+    }, 100);
+
+    const terminatorInterval = setInterval(() => {
+      if (terminatorRef.current) {
+        terminatorRef.current.setTime();
+        const path = terminatorRef.current.getElement();
+        if (path) {
+          path.classList.add('terminator-path');
+        }
+      }
+    }, 60000);
     
     map.on('moveend', () => {
       const center = map.getCenter();
       const zoom = map.getZoom();
       setMapView({ center: [center.lat, center.lng], zoom });
+    });
+
+    // Click handler:
+    // - Shift+click => turn rotator toward clicked point (if enabled)
+    // - Normal click => set DX (only if not locked)
+    map.on("click", (e) => {
+      // Normalize longitude to -180..180
+      let lon = e.latlng.lng;
+      while (lon > 180) lon -= 360;
+      while (lon < -180) lon += 360;
+
+      const oe = e?.originalEvent;
+      const isShift =
+        !!oe?.shiftKey ||
+        (typeof oe?.getModifierState === "function" && oe.getModifierState("Shift"));
+
+      // SHIFT+click => turn rotator (do NOT move DX)
+      if (isShift && rotatorEnabledRef.current && typeof rotatorTurnRef.current === "function") {
+        const de = deRef.current;
+        if (de?.lat != null && de?.lon != null) {
+          const az = initialBearingDeg(de.lat, de.lon, e.latlng.lat, lon);
+          rotatorTurnRef.current(az);
+          return;
+        }
+      }
+
+      // Normal click => move DX (only if not locked)
+      if (onDXChange && !dxLockedRef.current) {
+        onDXChange({ lat: e.latlng.lat, lon });
+      }
     });
 
     mapInstanceRef.current = map;
@@ -279,6 +385,12 @@ export const WorldMap = ({
       mapInstanceRef.current = null;
     };
   }, []); // Empty dependency array for initialization
+
+  // Update the value for how many scroll pixels count as a zoom level
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    mapInstanceRef.current.options.wheelPxPerZoomLevel = getScaledZoomLevel(mouseZoom);
+  }, [mouseZoom]);
 
   // Apply map lock — disable all navigation interactions while keeping click-through
   useEffect(() => {
@@ -307,8 +419,7 @@ export const WorldMap = ({
     try { localStorage.setItem('openhamclock_mapLocked', mapLocked ? 'true' : 'false'); } catch {}
   }, [mapLocked]);
 	
-// Update tile layer and handle night light clipping
-
+  // Update tile layer and handle night light clipping
   useEffect(() => {
     if (!mapInstanceRef.current || !tileLayerRef.current) return;
     const map = mapInstanceRef.current;
@@ -345,8 +456,8 @@ export const WorldMap = ({
     }
     
     // If you have a countries overlay, ensure it stays visible
-    if (countriesLayerRef.current) {
-      countriesLayerRef.current.bringToFront();
+    if (countriesLayerRef.current?.length) {
+      countriesLayerRef.current.forEach(l => { try { l.bringToFront(); } catch(e) {} });
     }
 
     // 4. Handle Clipping Mask
@@ -367,7 +478,7 @@ export const WorldMap = ({
     const maskInterval = setInterval(updateMask, 3000); 
 
     return () => clearInterval(maskInterval);
-}, [mapStyle, gibsOffset]);
+  }, [mapStyle, gibsOffset]);
   
   // End code dynamic GIBS generator if 'MODIS' is selected
 
@@ -376,11 +487,11 @@ export const WorldMap = ({
     if (!mapInstanceRef.current) return;
     const map = mapInstanceRef.current;
     
-    // Remove existing countries layer
-    if (countriesLayerRef.current) {
-      map.removeLayer(countriesLayerRef.current);
-      countriesLayerRef.current = null;
-    }
+    // Remove existing countries layers (all world copies)
+    countriesLayerRef.current.forEach(layer => {
+      try { map.removeLayer(layer); } catch (e) {}
+    });
+    countriesLayerRef.current = [];
     
     // Only add overlay for countries style
     if (!MAP_STYLES[mapStyle]?.countriesOverlay) return;
@@ -404,6 +515,29 @@ export const WorldMap = ({
       return COLORS[Math.abs(hash) % COLORS.length];
     };
     
+    // Deep-shift all coordinates in a GeoJSON geometry by a longitude offset
+    const shiftCoords = (coords, offset) => {
+      if (typeof coords[0] === 'number') {
+        // [lon, lat] point
+        return [coords[0] + offset, coords[1]];
+      }
+      return coords.map(c => shiftCoords(c, offset));
+    };
+    
+    const shiftGeoJSON = (geojson, offset) => {
+      if (offset === 0) return geojson;
+      return {
+        ...geojson,
+        features: geojson.features.map(f => ({
+          ...f,
+          geometry: {
+            ...f.geometry,
+            coordinates: shiftCoords(f.geometry.coordinates, offset)
+          }
+        }))
+      };
+    };
+    
     // Fetch world countries GeoJSON (Natural Earth 110m simplified, ~240KB)
     fetch('https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json')
       .then(res => {
@@ -413,30 +547,39 @@ export const WorldMap = ({
       .then(geojson => {
         if (!mapInstanceRef.current) return;
         
-        countriesLayerRef.current = L.geoJSON(geojson, {
-          style: (feature) => {
-            const name = feature.properties?.name || feature.id || 'Unknown';
-            return {
-              fillColor: hashColor(name),
-              fillOpacity: 0.65,
-              color: '#fff',
-              weight: 1,
-              opacity: 0.8
-            };
-          },
-          onEachFeature: (feature, layer) => {
-            const name = feature.properties?.name || 'Unknown';
-            layer.bindTooltip(name, {
-              sticky: true,
-              className: 'country-tooltip',
-              direction: 'top',
-              offset: [0, -5]
-            });
-          }
-        }).addTo(map);
+        const styleFunc = (feature) => {
+          const name = feature.properties?.name || feature.id || 'Unknown';
+          return {
+            fillColor: hashColor(name),
+            fillOpacity: 0.65,
+            color: '#fff',
+            weight: 1,
+            opacity: 0.8
+          };
+        };
         
-        // Ensure countries layer is below markers but above tiles
-        countriesLayerRef.current.bringToBack();
+        // Create 3 world copies: left (-360), center (0), right (+360)
+        for (const offset of [-360, 0, 360]) {
+          const shifted = shiftGeoJSON(geojson, offset);
+          const layer = L.geoJSON(shifted, {
+            style: styleFunc,
+            // Only add tooltips to center copy to avoid duplicates
+            onEachFeature: offset === 0 ? (feature, layer) => {
+              const name = feature.properties?.name || 'Unknown';
+              layer.bindTooltip(name, {
+                sticky: true,
+                className: 'country-tooltip',
+                direction: 'top',
+                offset: [0, -5]
+              });
+            } : undefined
+          }).addTo(map);
+          
+          countriesLayerRef.current.push(layer);
+        }
+        
+        // Ensure countries layers are below markers but above tiles
+        countriesLayerRef.current.forEach(l => l.bringToBack());
         // Put tile layer behind countries
         if (tileLayerRef.current) tileLayerRef.current.bringToBack();
         // Terminator on top
@@ -445,6 +588,19 @@ export const WorldMap = ({
       .catch(err => {
         console.warn('Could not load countries GeoJSON:', err);
       });
+
+    return () => {
+      try {
+        if (rotatorLineRef.current) {
+          map.removeLayer(rotatorLineRef.current);
+          rotatorLineRef.current = null;
+        }
+        if (rotatorGlowRef.current) {
+          map.removeLayer(rotatorGlowRef.current);
+          rotatorGlowRef.current = null;
+        }
+      } catch {}
+    };
   }, [mapStyle]);
 
   // Update DE/DX markers
@@ -619,6 +775,83 @@ export const WorldMap = ({
     }
   }, [dxPaths, dxFilters, showDXPaths, showDXLabels, hoveredSpot]);
 
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map || typeof L === 'undefined') return;
+
+    const lat = deLocation?.lat;
+    const lon = deLocation?.lon;
+
+    const aRaw = rotatorAzimuth ?? rotatorLastGoodAzimuth;
+    const az = Number.isFinite(aRaw) ? (((aRaw % 360) + 360) % 360) : null;
+
+    // If disabled or no DE/azimuth, remove layer if it exists
+    if (!showRotatorBearing || !Number.isFinite(lat) || !Number.isFinite(lon) || az == null) {
+      if (rotatorLineRef.current) { map.removeLayer(rotatorLineRef.current); rotatorLineRef.current = null; }
+      if (rotatorGlowRef.current) { map.removeLayer(rotatorGlowRef.current); rotatorGlowRef.current = null; }
+      return;
+    }
+
+    let points = buildBearingPoints(lat, lon, az, 95, 2);
+    points = unwrapLonPath(points);
+
+    // Create if missing
+    if (!rotatorGlowRef.current) {
+      rotatorGlowRef.current = L.polyline(points, {
+        color: 'rgba(0,255,255,0.20)',
+        weight: 8,
+        opacity: 1,
+        dashArray: '10 10',
+        className: 'ohc-rotator-bearing-glow',
+        interactive: false,
+      }).addTo(map);
+    } else {
+      rotatorGlowRef.current.setLatLngs(points);
+    }
+
+    if (!rotatorLineRef.current) {
+      rotatorLineRef.current = L.polyline(points, {
+        color: 'rgba(0,255,255,0.78)',
+        weight: 2.4,
+        opacity: rotatorIsStale ? 0.55 : 1,
+        dashArray: '10 10',
+        className: 'ohc-rotator-bearing',
+        interactive: false,
+      }).addTo(map);
+    } else {
+      rotatorLineRef.current.setLatLngs(points);
+      rotatorLineRef.current.setStyle({ opacity: rotatorIsStale ? 0.55 : 1 });
+    }
+  }, [
+    showRotatorBearing,
+    deLocation?.lat,
+    deLocation?.lon,
+    rotatorAzimuth,
+    rotatorLastGoodAzimuth,
+    rotatorIsStale
+  ]);
+
+  const unwrapLonPath = (latlngs) => {
+    if (!Array.isArray(latlngs) || latlngs.length < 2) return latlngs;
+
+    const out = [];
+    let prevLon = latlngs[0][1];
+    out.push(latlngs[0]);
+
+    for (let i = 1; i < latlngs.length; i++) {
+      const [lat, lon] = latlngs[i];
+      let adjLon = lon;
+
+      // shift lon by +/- 360 to minimize jump from previous
+      while (adjLon - prevLon > 180) adjLon -= 360;
+      while (adjLon - prevLon < -180) adjLon += 360;
+
+      out.push([lat, adjLon]);
+      prevLon = adjLon;
+    }
+    return out;
+  };
+
   // Update POTA markers
   useEffect(() => {
     if (!mapInstanceRef.current) return;
@@ -645,7 +878,7 @@ export const WorldMap = ({
           });
 
           // Only show callsign label when labels are enabled — replicate
-          if (showDXLabels) {
+          if (showPOTALabels) {
             const labelIcon = L.divIcon({
               className: '',
               html: `<span style="display:inline-block;background:#44cc44;color:#000;padding:4px 8px;border-radius:4px;font-size:12px;font-family:'JetBrains Mono',monospace;font-weight:700;white-space:nowrap;border:2px solid rgba(0,0,0,0.5);box-shadow:0 2px 4px rgba(0,0,0,0.4);">${spot.call}</span>`,
@@ -660,7 +893,48 @@ export const WorldMap = ({
         }
       });
     }
-  }, [potaSpots, showPOTA, showDXLabels]);
+  }, [potaSpots, showPOTA, showPOTALabels]);
+
+// Update WWFF markers
+  useEffect(() => {
+    if (!mapInstanceRef.current) return;
+    const map = mapInstanceRef.current;
+
+    wwffMarkersRef.current.forEach(m => map.removeLayer(m));
+    wwffMarkersRef.current = [];
+
+    if (showWWFF && wwffSpots) {
+      wwffSpots.forEach(spot => {
+        if (spot.lat && spot.lon) {
+          // Light Green triangle marker for WWFF activators
+          const triangleIcon = L.divIcon({
+            className: '',
+            html: `<span style="display:inline-block;width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:14px solid #a3f3a3;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.6));"></span>`,
+            iconSize: [14, 14],
+            iconAnchor: [7, 14]
+          });
+          const marker = L.marker([spot.lat, spot.lon], { icon: triangleIcon })
+            .bindPopup(`<b data-qrz-call="${esc(spot.call)}" style="color:#44cc44; cursor:pointer">${esc(spot.call)}</b><br><span style="color:#888">${esc(spot.ref)}</span> ${esc(spot.locationDesc || '')}<br>${spot.name ? `<i>${esc(spot.name)}</i><br>` : ''}${esc(spot.freq)} ${esc(spot.mode || '')} <span style="color:#888">${esc(spot.time || '')}</span>`)
+            .addTo(map);
+          wwffMarkersRef.current.push(marker);
+
+          // Only show callsign label when labels are enabled — replicate
+          if (showDXLabels) {
+            const labelIcon = L.divIcon({
+              className: '',
+              html: `<span style="display:inline-block;background:#a3f3a3;color:#000;padding:4px 8px;border-radius:4px;font-size:12px;font-family:'JetBrains Mono',monospace;font-weight:700;white-space:nowrap;border:2px solid rgba(0,0,0,0.5);box-shadow:0 2px 4px rgba(0,0,0,0.4);">${esc(spot.call)}</span>`,
+              iconSize: null,
+              iconAnchor: [0, -2]
+            });
+            replicatePoint(spot.lat, spot.lon).forEach(([lat, lon]) => {
+              const label = L.marker([spot.lat, spot.lon], { icon: labelIcon, interactive: false }).addTo(map);
+              wwffMarkersRef.current.push(label);
+            });
+          }
+        }
+      });
+    }
+  }, [wwffSpots, showWWFF, showDXLabels]);
 
 // Update WWFF markers
   useEffect(() => {
@@ -746,7 +1020,7 @@ export const WorldMap = ({
     }
   }, [sotaSpots, showSOTA, showDXLabels]);
 
-    // Plugin layer system - properly load saved states
+  // Plugin layer system - properly load saved states
   useEffect(() => {
     if (!mapInstanceRef.current) return;
 
@@ -776,53 +1050,48 @@ export const WorldMap = ({
       }
 
       // Expose controls for SettingsPanel
-		window.hamclockLayerControls = {
-		  layers: availableLayers.map(l => ({
-			...l,
-			enabled: pluginLayerStates[l.id]?.enabled ?? initialStates[l.id]?.enabled ?? l.defaultEnabled,
-			opacity: pluginLayerStates[l.id]?.opacity ?? initialStates[l.id]?.opacity ?? l.defaultOpacity,
-			// ADD: Pass the current config (showTracks/showFootprints) to the settings menu
-			config: pluginLayerStates[l.id]?.config ?? initialStates[l.id]?.config ?? l.config
-		  })),
-		  
-		  toggleLayer: (id, enabled) => {
-			const settings = getStoredMapSettings();
-			const layers = settings.layers || {};
-			layers[id] = { ...(layers[id] || {}), enabled };
-			localStorage.setItem('openhamclock_mapSettings', JSON.stringify({ ...settings, layers }));
-			setPluginLayerStates(prev => ({ ...prev, [id]: { ...prev[id], enabled } }));
-		  },
+      window.hamclockLayerControls = {
+        layers: availableLayers.map(l => ({
+          ...l,
+          enabled: pluginLayerStates[l.id]?.enabled ?? initialStates[l.id]?.enabled ?? l.defaultEnabled,
+          opacity: pluginLayerStates[l.id]?.opacity ?? initialStates[l.id]?.opacity ?? l.defaultOpacity,
+          config: pluginLayerStates[l.id]?.config ?? initialStates[l.id]?.config ?? l.config
+        })),
+        
+        toggleLayer: (id, enabled) => {
+          const settings = getStoredMapSettings();
+          const layers = settings.layers || {};
+          layers[id] = { ...(layers[id] || {}), enabled };
+          localStorage.setItem('openhamclock_mapSettings', JSON.stringify({ ...settings, layers }));
+          setPluginLayerStates(prev => ({ ...prev, [id]: { ...prev[id], enabled } }));
+        },
 
-		  setOpacity: (id, opacity) => {
-			const settings = getStoredMapSettings();
-			const layers = settings.layers || {};
-			layers[id] = { ...(layers[id] || {}), opacity };
-			localStorage.setItem('openhamclock_mapSettings', JSON.stringify({ ...settings, layers }));
-			setPluginLayerStates(prev => ({ ...prev, [id]: { ...prev[id], opacity } }));
-		  },
+        setOpacity: (id, opacity) => {
+          const settings = getStoredMapSettings();
+          const layers = settings.layers || {};
+          layers[id] = { ...(layers[id] || {}), opacity };
+          localStorage.setItem('openhamclock_mapSettings', JSON.stringify({ ...settings, layers }));
+          setPluginLayerStates(prev => ({ ...prev, [id]: { ...prev[id], opacity } }));
+        },
 
-		  // ADD THIS NEW FUNCTION:
-		  updateLayerConfig: (id, configDelta) => {
-			const settings = getStoredMapSettings();
-			const layers = settings.layers || {};
-			const currentLayer = layers[id] || {};
-			
-			// Merge the new checkbox state (e.g., {showTracks: false}) into existing config
-			layers[id] = {
-			  ...currentLayer,
-			  config: { ...(currentLayer.config || {}), ...configDelta }
-			};
-			
-			// Save to localStorage so it persists after refresh
-			localStorage.setItem('openhamclock_mapSettings', JSON.stringify({ ...settings, layers }));
-			
-			// Update React state to trigger the map redraw
-			setPluginLayerStates(prev => ({
-			  ...prev,
-			  [id]: { ...prev[id], config: { ...(prev[id]?.config || {}), ...configDelta } }
-			}));
-		  }
-		};
+        updateLayerConfig: (id, configDelta) => {
+          const settings = getStoredMapSettings();
+          const layers = settings.layers || {};
+          const currentLayer = layers[id] || {};
+          
+          layers[id] = {
+            ...currentLayer,
+            config: { ...(currentLayer.config || {}), ...configDelta }
+          };
+          
+          localStorage.setItem('openhamclock_mapSettings', JSON.stringify({ ...settings, layers }));
+          
+          setPluginLayerStates(prev => ({
+            ...prev,
+            [id]: { ...prev[id], config: { ...(prev[id]?.config || {}), ...configDelta } }
+          }));
+        }
+      };
 		
     } catch (err) {
       console.error('Plugin system error:', err);
@@ -993,21 +1262,20 @@ export const WorldMap = ({
 
       {/* Render all plugin layers */}
       {mapInstanceRef.current && getAllLayers().map(layerDef => (
-	  <PluginLayer
-		key={layerDef.id}
-		plugin={layerDef}
-		enabled={pluginLayerStates[layerDef.id]?.enabled ?? layerDef.defaultEnabled}
-		opacity={pluginLayerStates[layerDef.id]?.opacity ?? layerDef.defaultOpacity}
-		config={pluginLayerStates[layerDef.id]?.config ?? layerDef.config}
-		  
-		  map={mapInstanceRef.current}
-		  satellites={satellites}
-		  units={units}
-		  callsign={callsign}
-		  locator={deLocator}
-		  lowMemoryMode={lowMemoryMode}
-		/>
-		))}
+        <PluginLayer
+          key={layerDef.id}
+          plugin={layerDef}
+          enabled={pluginLayerStates[layerDef.id]?.enabled ?? layerDef.defaultEnabled}
+          opacity={pluginLayerStates[layerDef.id]?.opacity ?? layerDef.defaultOpacity}
+          config={pluginLayerStates[layerDef.id]?.config ?? layerDef.config}
+          map={mapInstanceRef.current}
+          satellites={satellites}
+          units={units}
+          callsign={callsign}
+          locator={deLocator}
+          lowMemoryMode={lowMemoryMode}
+        />
+      ))}
 
       {/* MODIS Control (Only shows when MODIS map style is active) */}
 
@@ -1040,7 +1308,7 @@ export const WorldMap = ({
       {mapStyle === 'MODIS' && (
         <div style={{
           position: 'absolute',
-          top: '50px', 
+          top: '50px',
           right: '10px',
           background: 'rgba(0, 0, 0, 0.8)',
           border: '1px solid #444',
@@ -1092,7 +1360,7 @@ export const WorldMap = ({
 
       
       {/* Labels toggle */}
-      {onToggleDXLabels && showDXPaths && (
+      {onToggleDXLabels && showDXPaths && Array.isArray(dxPaths) && dxPaths.length > 0 && (
         <button
           onClick={onToggleDXLabels}
           title={showDXLabels ? 'Hide callsign labels on map' : 'Show callsign labels on map'}
@@ -1177,6 +1445,33 @@ export const WorldMap = ({
           </div>
         </div>
       )}
+      <style>{`
+        .ohc-rotator-bearing {
+          stroke-dasharray: 10 10;
+          animation: ohcRotDash 2.8s linear infinite, ohcRotPulse 3.2s ease-in-out infinite;
+          filter: drop-shadow(0 0 4px rgba(0,255,255,0.25));
+        }
+
+        .ohc-rotator-bearing-glow {
+          stroke-dasharray: 10 10;
+          animation: ohcRotDash 2.8s linear infinite, ohcRotGlow 3.2s ease-in-out infinite;
+        }
+
+        @keyframes ohcRotDash {
+          from { stroke-dashoffset: 0; }
+          to   { stroke-dashoffset: -44; }
+        }
+
+        @keyframes ohcRotPulse {
+          0%,100% { opacity: 0.55; }
+          50%     { opacity: 0.95; }
+        }
+
+        @keyframes ohcRotGlow {
+          0%,100% { opacity: 0.10; }
+          50%     { opacity: 0.24; }
+        }
+      `}</style>
     </div>
   );
 };
