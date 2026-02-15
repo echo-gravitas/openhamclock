@@ -6,6 +6,7 @@ export const metadata = {
   description: 'Shows recently logged QSOs sent from the N3FJP bridge.',
   icon: '🗺️',
   category: 'overlay',
+  localOnly: true,
   defaultEnabled: false,
   defaultOpacity: 0.9,
   version: '0.2.0'
@@ -250,91 +251,25 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null }) {
     };
   }, [enabled]);
 
-  // Add a small on-map control for display window + line color
+  /// React to Integrations panel changes (display window + color)
   useEffect(() => {
-    if (!enabled || !map || typeof L === 'undefined') return;
+    if (!enabled) return;
 
-    const control = L.control({ position: 'topright' });
-
-    control.onAdd = () => {
-      const div = L.DomUtil.create('div', 'n3fjp-layer-control');
-      div.style.background = 'rgba(0,0,0,0.65)';
-      div.style.color = 'white';
-      div.style.padding = '8px 10px';
-      div.style.borderRadius = '8px';
-      div.style.fontFamily = 'JetBrains Mono, monospace';
-      div.style.fontSize = '12px';
-      div.style.minWidth = '190px';
-
-      // Stop map dragging/zooming when interacting with the control
-      L.DomEvent.disableClickPropagation(div);
-      L.DomEvent.disableScrollPropagation(div);
-
-      div.innerHTML = `
-        <div style="font-weight:bold; margin-bottom:6px;">N3FJP QSOs</div>
-
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:6px;">
-          <span>Show last</span>
-          <select id="n3fjp_minutes" style="flex:1; margin-left:8px; padding:2px 4px;">
-            <option value="5">5 min</option>
-            <option value="10">10 min</option>
-            <option value="15">15 min</option>
-            <option value="30">30 min</option>
-            <option value="60">60 min</option>
-            <option value="120">120 min</option>
-          </select>
-        </div>
-
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
-          <span>Line color</span>
-          <input id="n3fjp_color" type="color" style="width:52px; height:24px; padding:0; border:0; background:transparent;" />
-        </div>
-      `;
-
-      // Initialize controls
-      const sel = div.querySelector('#n3fjp_minutes');
-      const col = div.querySelector('#n3fjp_color');
-
-      if (sel) sel.value = String(displayMinutes);
-      if (col) col.value = String(lineColor);
-
-      // Wire events
-      if (sel) {
-        sel.addEventListener('change', (e) => {
-          const v = parseInt(e.target.value, 10);
-          if (Number.isFinite(v)) {
-            localStorage.setItem(STORAGE_MINUTES_KEY, String(v));
-            setDisplayMinutes(v);
-          }
-        });
-      }
-
-      if (col) {
-        col.addEventListener('change', (e) => {
-          const v = e.target.value || '#3388ff';
-          localStorage.setItem(STORAGE_COLOR_KEY, v);
-          setLineColor(v);
-        });
-      }
-
-      return div;
+    const sync = () => {
+      try {
+        const m = parseInt(localStorage.getItem(STORAGE_MINUTES_KEY) || '15', 10);
+        if (Number.isFinite(m)) setDisplayMinutes(m);
+      } catch {}
+      try {
+        const c = localStorage.getItem(STORAGE_COLOR_KEY) || '#3388ff';
+        setLineColor(c);
+      } catch {}
     };
 
-    control.addTo(map);
-    
-    // Add draggable and minimize functionality
-    const controlElement = control.getContainer();
-    if (controlElement) {
-      setTimeout(() => {
-        makeDraggable(controlElement, 'n3fjp-position');
-        addMinimizeToggle(controlElement, 'n3fjp-position');
-      }, 150);
-    }
-
-    return () => {
-      try { control.remove(); } catch {}
-    };
-  }, [enabled, map, displayMinutes, lineColor]);
+    sync();
+    window.addEventListener('ohc-n3fjp-config-changed', sync);
+    return () => window.removeEventListener('ohc-n3fjp-config-changed', sync);
+  }, [enabled]);
 
   // Draw markers/lines whenever qsos changes
   useEffect(() => {
@@ -366,15 +301,33 @@ export function useLayer({ enabled = false, opacity = 0.9, map = null }) {
 
     // Read station position from OpenHamClock config (if present)
     let station = null;
+
     try {
       const raw = localStorage.getItem('openhamclock_config');
       if (raw) {
         const cfg = JSON.parse(raw);
         const lat = cfg?.location?.lat;
         const lon = cfg?.location?.lon;
-        if (typeof lat === 'number' && typeof lon === 'number') station = { lat, lon };
+        if (typeof lat === 'number' && typeof lon === 'number') {
+          station = { lat, lon };
+        }
       }
     } catch {}
+
+    // ✅ Fallback to Maidenhead if lat/lon missing
+    if (!station) {
+      try {
+        const raw = localStorage.getItem('openhamclock_config');
+        if (raw) {
+          const cfg = JSON.parse(raw);
+          const grid = cfg?.station?.locator;
+          if (grid && grid.length >= 4) {
+            const { lat, lon } = maidenheadToLatLon(grid);
+            station = { lat, lon };
+          }
+        }
+      } catch {}
+    }
 
     const newLayers = [];
 

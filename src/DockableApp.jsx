@@ -30,6 +30,7 @@ import { DockableLayoutProvider } from './contexts';
 import './styles/flexlayout-openhamclock.css';
 import useMapLayers from './hooks/app/useMapLayers';
 import useRotator from "./hooks/useRotator";
+import useLocalInstall from './hooks/app/useLocalInstall';
 
 // Icons
 const PlusIcon = () => (
@@ -143,6 +144,37 @@ export const DockableApp = ({
   const toggleWSJTXEff = useInternalMapLayers ? internalMap.toggleWSJTX : toggleWSJTX;
   const toggleRotatorBearingEff = useInternalMapLayers ? internalMap.toggleRotatorBearing : toggleRotatorBearing;
 
+  // Rotator is a local-only feature and must never break hosted deployments.
+  const isLocalInstallHook = useLocalInstall();
+  const isLocal = (typeof isLocalInstall === "boolean") ? isLocalInstall : isLocalInstallHook;
+
+  const [rotatorFeatureEnabled, setRotatorFeatureEnabled] = useState(() => {
+    try {
+      return localStorage.getItem('ohc_rotator_enabled') === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  // Allow SettingsPanel (and other UI) to toggle rotator via localStorage.
+  useEffect(() => {
+    const onChange = () => {
+      try {
+        setRotatorFeatureEnabled(localStorage.getItem('ohc_rotator_enabled') === '1');
+      } catch {
+        setRotatorFeatureEnabled(false);
+      }
+    };
+    window.addEventListener('storage', onChange);
+    window.addEventListener('ohc-rotator-config-changed', onChange);
+    return () => {
+      window.removeEventListener('storage', onChange);
+      window.removeEventListener('ohc-rotator-config-changed', onChange);
+    };
+  }, []);
+
+  const rotatorEnabled = isLocal && rotatorFeatureEnabled;
+
   // Per-panel zoom levels (persisted)
   const [panelZoom, setPanelZoom] = useState(() => {
     try {
@@ -201,6 +233,8 @@ export const DockableApp = ({
       } catch { return false; }
     })();
 
+    const showRotator = true;
+
     return {
       'world-map': { name: 'World Map', icon: '🗺️' },
       'de-location': { name: 'DE Location', icon: '📍' },
@@ -221,12 +255,12 @@ export const DockableApp = ({
       'dxpeditions': { name: 'DXpeditions', icon: '🏝️' },
       'pota': { name: 'POTA', icon: '🏕️' },
       'sota': { name: 'SOTA', icon: '⛰️' },
-      'rotator': { name: 'Rotator', icon: '🧭' },
+      ...(showRotator ? { 'rotator': { name: 'Rotator', icon: '🧭' } } : {}),
       'contests': { name: 'Contests', icon: '🏆' },
       ...(hasAmbient ? { 'ambient': { name: 'Ambient Weather', icon: '🌦️' } } : {}),
       'id-timer': { name: 'ID Timer', icon: '📢' },
     };
-  }, []);
+  }, [rotatorEnabled]);
 
   // Add panel
   const handleAddPanel = useCallback((panelId) => {
@@ -311,12 +345,15 @@ export const DockableApp = ({
   );
 
   const rot = useRotator({
-  mock: false,
-  endpointUrl: "/api/rotator/status",
-  pollMs: 1000,
-  staleMs: 5000,
-});
+    enabled: rotatorEnabled,
+    mock: false,
+    endpointUrl: "/api/rotator/status",
+    pollMs: 1000,
+    staleMs: 5000,
+  });
+
   const turnRotator = useCallback(async (azimuth) => {
+    if (!rotatorEnabled) return { ok: false, error: 'rotator disabled' };
     const res = await fetch("/api/rotator/turn", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -327,16 +364,17 @@ export const DockableApp = ({
       throw new Error(data?.error || `HTTP ${res.status}`);
     }
     return data;
-  }, []);
+  }, [rotatorEnabled]);
 
   const stopRotator = useCallback(async () => {
+    if (!rotatorEnabled) return { ok: false, error: 'rotator disabled' };
     const res = await fetch("/api/rotator/stop", { method: "POST" });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data?.ok === false) {
       throw new Error(data?.error || `HTTP ${res.status}`);
     }
     return data;
-  }, []);
+  }, [rotatorEnabled]);
   
   // Render World Map
   const renderWorldMap = () => (
@@ -373,12 +411,12 @@ export const DockableApp = ({
         showDXNews={mapLayersEff.showDXNews}
 
         // ✅ Rotator bearing overlay support
-        showRotatorBearing={mapLayersEff.showRotatorBearing}
-        rotatorAzimuth={rot.azimuth}
-        rotatorLastGoodAzimuth={rot.lastGoodAzimuth}
-        rotatorIsStale={rot.isStale}
-        rotatorControlEnabled={!rot.isStale}
-        onRotatorTurnRequest={turnRotator}
+        showRotatorBearing={rotatorEnabled ? mapLayersEff.showRotatorBearing : false}
+        rotatorAzimuth={rotatorEnabled ? rot.azimuth : null}
+        rotatorLastGoodAzimuth={rotatorEnabled ? rot.lastGoodAzimuth : null}
+        rotatorIsStale={rotatorEnabled ? rot.isStale : true}
+        rotatorControlEnabled={rotatorEnabled ? !rot.isStale : false}
+        onRotatorTurnRequest={rotatorEnabled ? turnRotator : undefined}
 
         hoveredSpot={hoveredSpot}
         leftSidebarVisible={true}
@@ -536,7 +574,30 @@ export const DockableApp = ({
         content = <ContestPanel data={contests.data} loading={contests.loading} />;
         break;
       
-      case "rotator":
+      case "rotator": {
+        if (!rotatorEnabled) 
+          return (
+            <div style={{ padding: 14, height: "100%", overflow: "auto" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "var(--accent-amber)", marginBottom: 8 }}>
+                🧭 Rotator (Local Only)
+              </div>
+              <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5 }}>
+                Rotator support is disabled (or you are on the hosted site). Enable it in Settings → Integrations when running OpenHamClock locally.
+              </div>
+            </div>
+          );
+          return (
+          <RotatorPanel
+            state={rot}
+            overlayEnabled={mapLayersEff.showRotatorBearing}
+            onToggleOverlay={toggleRotatorBearingEff}
+            onTurnAzimuth={turnRotator}
+            onStop={stopRotator}
+            controlsEnabled={!rot.isStale}
+          />
+        );
+      }
+
         return (
           <RotatorPanel
             state={rot}

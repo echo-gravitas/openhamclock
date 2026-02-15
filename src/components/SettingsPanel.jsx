@@ -18,6 +18,8 @@ import {
   importProfile
 } from '../utils/profiles.js';
 
+import useLocalInstall from '../hooks/app/useLocalInstall.js';
+
 export const SettingsPanel = ({ isOpen, onClose, config, onSave, onResetLayout, satellites, satelliteFilters, onSatelliteFiltersChange, mapLayers, onToggleDXNews }) => {
   const [callsign, setCallsign] = useState(config?.callsign || '');
   const [headerSize, setheaderSize] = useState(config?.headerSize || 1.0);
@@ -34,6 +36,40 @@ export const SettingsPanel = ({ isOpen, onClose, config, onSave, onResetLayout, 
   const [propMode, setPropMode] = useState(config?.propagation?.mode || 'SSB');
   const [propPower, setPropPower] = useState(config?.propagation?.power || 100);
   const [satelliteSearch, setSatelliteSearch] = useState('');
+  const isLocalInstall = useLocalInstall();
+  const [rotatorEnabled, setRotatorEnabled] = useState(() => {
+    try {
+      return localStorage.getItem('ohc_rotator_enabled') === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  // Local-only integration flags
+  const [n3fjpEnabled, setN3fjpEnabled] = useState(() => {
+    try {
+      return localStorage.getItem('ohc_n3fjp_enabled') === '1';
+    } catch {
+      return false;
+    }
+  });
+
+  // N3FJP UI settings (persisted)
+  const [n3fjpDisplayMinutes, setN3fjpDisplayMinutes] = useState(() => {
+    try {
+      const v = parseInt(localStorage.getItem('n3fjp_display_minutes') || '15', 10);
+      return Number.isFinite(v) ? v : 15;
+    } catch {
+      return 15;
+    }
+  });
+  const [n3fjpLineColor, setN3fjpLineColor] = useState(() => {
+    try {
+      return localStorage.getItem('n3fjp_line_color') || '#3388ff';
+    } catch {
+      return '#3388ff';
+    }
+  });
   const { t, i18n } = useTranslation();
 
   // Layer controls
@@ -82,6 +118,31 @@ export const SettingsPanel = ({ isOpen, onClose, config, onSave, onResetLayout, 
       }
     }
   }, [config, isOpen]);
+
+  // Keep rotator toggle in sync with localStorage when opening settings
+  useEffect(() => {
+    if (!isOpen) return;
+    try {
+      setRotatorEnabled(localStorage.getItem('ohc_rotator_enabled') === '1');
+    } catch {
+      setRotatorEnabled(false);
+    }
+  }, [isOpen]);
+
+  // Keep N3FJP toggle/settings in sync with localStorage when opening settings
+  useEffect(() => {
+    if (!isOpen) return;
+    try {
+      setN3fjpEnabled(localStorage.getItem('ohc_n3fjp_enabled') === '1');
+      const v = parseInt(localStorage.getItem('n3fjp_display_minutes') || '15', 10);
+      setN3fjpDisplayMinutes(Number.isFinite(v) ? v : 15);
+      setN3fjpLineColor(localStorage.getItem('n3fjp_line_color') || '#3388ff');
+    } catch {
+      setN3fjpEnabled(false);
+      setN3fjpDisplayMinutes(15);
+      setN3fjpLineColor('#3388ff');
+    }
+  }, [isOpen]);
 
   // Load layers when panel opens
   useEffect(() => {
@@ -357,6 +418,25 @@ const handleUpdateLayerConfig = (layerId, configDelta) => {
           >
             {t('station.settings.tab1.title')}
           </button>
+
+          <button
+            onClick={() => setActiveTab('integrations')}
+            style={{
+              flex: 1,
+              padding: '10px',
+              background: activeTab === 'integrations' ? 'var(--accent-amber)' : 'transparent',
+              border: 'none',
+              borderRadius: '6px 6px 0 0',
+              color: activeTab === 'integrations' ? '#000' : 'var(--text-secondary)',
+              fontSize: '13px',
+              cursor: 'pointer',
+              fontWeight: activeTab === 'integrations' ? '700' : '400',
+              fontFamily: 'JetBrains Mono, monospace'
+            }}
+          >
+            Integrations
+          </button>
+
           <button
             onClick={() => setActiveTab('layers')}
             style={{
@@ -434,6 +514,19 @@ const handleUpdateLayerConfig = (layerId, configDelta) => {
                 </div>
               </div>
             )}
+
+            {/* Integrations moved to dedicated tab */}
+            <div style={{
+              background: 'rgba(0, 255, 255, 0.04)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '8px',
+              padding: '10px 14px',
+              marginBottom: '20px',
+              fontSize: 12,
+              color: 'var(--text-secondary)'
+            }}>
+              Looking for Rotator / N3FJP / other add-ons? See <b>Settings → Integrations</b>.
+            </div>
 
             {/* Callsign */}
             <div style={{ marginBottom: '20px' }}>
@@ -1118,6 +1211,382 @@ const handleUpdateLayerConfig = (layerId, configDelta) => {
               </div>
             </div>
           </>
+        )}
+
+        {/* Integrations Tab */}
+        {activeTab === 'integrations' && (
+          <div>
+            {/* Status pill */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              marginBottom: 16,
+              padding: '10px 14px',
+              borderRadius: 10,
+              border: '1px solid var(--border-color)',
+              background: 'var(--bg-tertiary)'
+            }}>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
+                These features require a local OpenHamClock instance.
+              </div>
+              <div style={{
+                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: 11,
+                padding: '4px 10px',
+                borderRadius: 999,
+                border: `1px solid ${isLocalInstall ? 'var(--accent-cyan)' : 'rgba(255,255,255,0.18)'}`,
+                color: isLocalInstall ? 'var(--accent-cyan)' : 'var(--text-muted)',
+                background: isLocalInstall ? 'rgba(0,255,255,0.10)' : 'rgba(0,0,0,0.25)'
+              }}>
+                {isLocalInstall ? 'Local mode' : 'Hosted mode'}
+              </div>
+            </div>
+
+            {/* Local-only group */}
+            <div style={{
+              background: 'rgba(0, 255, 255, 0.05)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '10px',
+              padding: '14px 16px',
+              marginBottom: 16
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                gap: 12,
+                marginBottom: 10
+              }}>
+                <div>
+                  <div style={{ color: 'var(--accent-cyan)', fontWeight: 800, letterSpacing: 0.2 }}>
+                    Local-only
+                  </div>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.45, marginTop: 4 }}>
+                    These integrations are disabled on the hosted site so they can never crash or spam the network.
+                  </div>
+                </div>
+              </div>
+
+              {/* Rotator */}
+              <div style={{
+                borderTop: '1px solid rgba(255,255,255,0.08)',
+                paddingTop: 12,
+                marginTop: 8
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>🧭 Rotator</div>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.45 }}>
+                      Requires a rotator backend (e.g., PstRotatorAz or a simple HTTP bridge) reachable by your local OpenHamClock Node server.
+                    </div>
+                  </div>
+
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>
+                    <input
+                      type="checkbox"
+                      disabled={!isLocalInstall}
+                      checked={!!rotatorEnabled && isLocalInstall}
+                      onChange={(e) => {
+                        const next = !!e.target.checked;
+                        setRotatorEnabled(next);
+                        try { localStorage.setItem('ohc_rotator_enabled', next ? '1' : '0'); } catch {}
+                        // Default overlay OFF when enabling (hosted-safe + predictable)
+                        if (next) {
+                          try {
+                            const raw = localStorage.getItem('openhamclock_mapLayers') || '{}';
+                            const ml = JSON.parse(raw);
+                            ml.showRotatorBearing = false;
+                            localStorage.setItem('openhamclock_mapLayers', JSON.stringify(ml));
+                          } catch {}
+                        }
+                        try { window.dispatchEvent(new Event('ohc-rotator-config-changed')); } catch {}
+                      }}
+                    />
+                    Enable
+                  </label>
+                </div>
+
+                <details style={{ marginTop: 10 }}>
+                  <summary
+                    style={{
+                      cursor: "pointer",
+                      color: "var(--accent-amber)",
+                      fontSize: 12,
+                      userSelect: "none",
+                    }}
+                  >
+                    Learn how
+                  </summary>
+
+                  <div
+                    style={{
+                      marginTop: 8,
+                      color: "var(--text-secondary)",
+                      fontSize: 12,
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    <div style={{ marginBottom: 6 }}>
+                      <b>Quick start (Local Only):</b>
+                    </div>
+
+                    <ol style={{ margin: 0, paddingLeft: 18 }}>
+                      <li>
+                        Run OpenHamClock locally:
+                        <div style={{ fontFamily: "JetBrains Mono", marginTop: 4 }}>
+                          npm start
+                        </div>
+                        Open the local URL shown in your terminal (example: http://127.0.0.1:3001).
+                      </li>
+
+                      <li style={{ marginTop: 6 }}>
+                        Install and configure <b>PstRotatorAz</b> (or another rotator backend)
+                        on your LAN.
+                        <div style={{ marginTop: 4 }}>
+                          Enable and start its control interface (web/UDP).
+                        </div>
+                      </li>
+
+                      <li style={{ marginTop: 6 }}>
+                        In the OpenHamClock folder:
+                        <div style={{ fontFamily: "JetBrains Mono", marginTop: 4 }}>
+                          copy .env.example → .env
+                        </div>
+                        Then edit:
+                        <div style={{ fontFamily: "JetBrains Mono", marginTop: 4 }}>
+                          VITE_PSTROTATOR_TARGET=http://192.168.1.43:50004
+                        </div>
+                        (Replace with the IP and port of your PstRotatorAz machine.)
+                      </li>
+
+                      <li style={{ marginTop: 6 }}>
+                        Ensure Windows Firewall allows the PstRotatorAz port.
+                      </li>
+
+                      <li style={{ marginTop: 6 }}>
+                        Enable Rotator here, then add the <b>Rotator</b> panel using the “+”
+                        button on any tabset.
+                      </li>
+                    </ol>
+
+                    <div style={{ marginTop: 10, fontSize: 11, color: "var(--text-muted)" }}>
+                      Tip: Click <b>MAP ON</b> inside the Rotator panel to show the bearing
+                      overlay. Hold <b>Shift</b> and click the map to rotate your antenna to
+                      that heading.
+                    </div>
+
+                    <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
+                      Note: This feature cannot work on the hosted site because it requires
+                      access to devices on your local network.
+                    </div>
+                  </div>
+                </details>
+
+                {!isLocalInstall && (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      color: "var(--text-muted)",
+                      fontSize: 11,
+                    }}
+                  >
+                    Hosted mode detected — Rotator cannot be enabled here.
+                  </div>
+                )}
+
+              </div>
+
+              {/* N3FJP */}
+              <div style={{
+                borderTop: '1px solid rgba(255,255,255,0.08)',
+                paddingTop: 12,
+                marginTop: 14
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>🗺️ N3FJP Logged QSOs</div>
+                    <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.45 }}>
+                      Shows recent QSOs posted by your local N3FJP→OHC bridge (layer overlay).
+                    </div>
+                  </div>
+
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>
+                    <input
+                      type="checkbox"
+                      disabled={!isLocalInstall}
+                      checked={!!n3fjpEnabled && isLocalInstall}
+                      onChange={(e) => {
+                        const next = !!e.target.checked;
+                        setN3fjpEnabled(next);
+                        try { localStorage.setItem('ohc_n3fjp_enabled', next ? '1' : '0'); } catch {}
+                        try { window.dispatchEvent(new Event('ohc-n3fjp-config-changed')); } catch {}
+
+                        // ✅ Also toggle the map layer automatically
+                        try {
+                          // Preferred: uses live WorldMap controls (updates state + localStorage)
+                          if (window.hamclockLayerControls?.toggleLayer) {
+                            window.hamclockLayerControls.toggleLayer('n3fjp_logged_qsos', next);
+                          } else {
+                            // Fallback: write the plugin-layer setting directly
+                            const raw = localStorage.getItem('openhamclock_mapSettings') || '{}';
+                            const settings = JSON.parse(raw);
+                            const layers = settings.layers || {};
+                            layers['n3fjp_logged_qsos'] = { ...(layers['n3fjp_logged_qsos'] || {}), enabled: next };
+                            settings.layers = layers;
+                            localStorage.setItem('openhamclock_mapSettings', JSON.stringify(settings));
+                          }
+                        } catch {}
+                      }}
+                    />
+                    Enable
+                  </label>
+                </div>
+
+                {/* Simple config */}
+                <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
+                  <div style={{ flex: '1 1 160px' }}>
+                    <label style={{ display: 'block', marginBottom: 6, color: 'var(--text-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 }}>
+                      Display window
+                    </label>
+                    <select
+                      disabled={!isLocalInstall || !n3fjpEnabled}
+                      value={n3fjpDisplayMinutes}
+                      onChange={(e) => {
+                        const v = parseInt(e.target.value, 10);
+                        const next = Number.isFinite(v) ? v : 15;
+                        setN3fjpDisplayMinutes(next);
+                        try { localStorage.setItem('n3fjp_display_minutes', String(next)); } catch {}
+                        try { window.dispatchEvent(new Event('ohc-n3fjp-config-changed')); } catch {}
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        background: 'var(--bg-secondary)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '6px',
+                        color: 'var(--text-primary)',
+                        fontSize: '14px',
+                        fontFamily: 'JetBrains Mono, monospace'
+                      }}
+                    >
+                      {[15, 30, 60, 120, 240, 720, 1440].map((m) => (
+                        <option key={m} value={m}>
+                          {m === 60 ? "1 hour" : m < 60 ? `${m} min` : `${m / 60} hours`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ flex: '0 0 120px' }}>
+                    <label style={{ display: 'block', marginBottom: 6, color: 'var(--text-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1 }}>
+                      Line color
+                    </label>
+                    <input
+                      disabled={!isLocalInstall || !n3fjpEnabled}
+                      type="color"
+                      value={n3fjpLineColor}
+                      onChange={(e) => {
+                        const next = e.target.value || '#3388ff';
+                        setN3fjpLineColor(next);
+                        try { localStorage.setItem('n3fjp_line_color', next); } catch {}
+                        try { window.dispatchEvent(new Event('ohc-n3fjp-config-changed')); } catch {}
+                      }}
+                      style={{
+                        width: '100%',
+                        height: 40,
+                        padding: 0,
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 6,
+                        background: 'transparent'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <details style={{ marginTop: 10 }}>
+                  <summary
+                    style={{
+                      cursor: "pointer",
+                      color: "var(--accent-amber)",
+                      fontSize: 12,
+                      userSelect: "none",
+                    }}
+                  >
+                    Learn how
+                  </summary>
+
+                  <div
+                    style={{
+                      marginTop: 8,
+                      color: "var(--text-secondary)",
+                      fontSize: 12,
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    <div style={{ marginBottom: 6 }}>
+                      <b>Quick start (Local Only):</b>
+                    </div>
+
+                    <ol style={{ margin: 0, paddingLeft: 18 }}>
+                      <li>
+                        Run OpenHamClock locally:
+                        <div style={{ fontFamily: "JetBrains Mono", marginTop: 4 }}>
+                          npm start
+                        </div>
+                        Open the local URL shown in your terminal
+                        (example: http://127.0.0.1:3001).
+                      </li>
+
+                      <li style={{ marginTop: 6 }}>
+                        Install the N3FJP bridge on the same PC (or LAN machine)
+                        that can access your N3FJP logger.
+                      </li>
+
+                      <li style={{ marginTop: 6 }}>
+                        Edit the bridge <b>config.json</b> file and set:
+                        <div style={{ fontFamily: "JetBrains Mono", marginTop: 4 }}>
+                          "OHC_BASE_URL": "http://127.0.0.1:3001"
+                        </div>
+                        (Use the exact URL printed by OpenHamClock.)
+                      </li>
+
+                      <li style={{ marginTop: 6 }}>
+                        Ensure:
+                        <div style={{ fontFamily: "JetBrains Mono", marginTop: 4 }}>
+                          "ENABLE_OHC_HTTP": true
+                        </div>
+                      </li>
+
+                      <li style={{ marginTop: 6 }}>
+                        Start the bridge script (PowerShell or VBS launcher).
+                        You should see log messages when QSOs are entered.
+                      </li>
+
+                      <li style={{ marginTop: 6 }}>
+                        Enable this integration here, then turn on
+                        <b> Logged QSOs (N3FJP)</b> in
+                        <b> Settings → Map Layers</b>.
+                      </li>
+                    </ol>
+
+                    <div style={{ marginTop: 10, fontSize: 11, color: "var(--text-muted)" }}>
+                      Tip: If you see “connection refused,” verify that OpenHamClock
+                      is running locally and that the port matches your
+                      <b> OHC_BASE_URL</b> setting.
+                    </div>
+
+                    <div style={{ marginTop: 6, fontSize: 11, color: "var(--text-muted)" }}>
+                      Note: This integration cannot work on the hosted site because it
+                      requires access to your local N3FJP logger and LAN services.
+                    </div>
+                  </div>
+                </details>
+
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Map Layers Tab */}

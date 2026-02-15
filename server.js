@@ -8613,7 +8613,7 @@ function handleWSJTXMessage(msg, state) {
 }
 
 // ---- N3FJP Logged QSO relay (in-memory) ----
-const N3FJP_QSO_RETENTION_MINUTES = parseInt(process.env.N3FJP_QSO_RETENTION_MINUTES || "15", 10);
+const N3FJP_QSO_RETENTION_MINUTES = parseInt(process.env.N3FJP_QSO_RETENTION_MINUTES || "1440", 10);
 let n3fjpQsos = [];
 
 function pruneN3fjpQsos() {

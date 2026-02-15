@@ -125,9 +125,37 @@ export const WorldMap = ({
   const pluginLayersRef = useRef({});
   const [pluginLayerStates, setPluginLayerStates] = useState({});
   const isLocalInstall = useLocalInstall();
+  const [integrationsRev, setIntegrationsRev] = useState(0);
+
+  // Re-evaluate feature-gated integrations when toggles change in Settings
+  useEffect(() => {
+    const bump = () => setIntegrationsRev(v => v + 1);
+    try {
+      window.addEventListener('ohc-n3fjp-config-changed', bump);
+      window.addEventListener('ohc-rotator-config-changed', bump);
+    } catch {}
+    return () => {
+      try {
+        window.removeEventListener('ohc-n3fjp-config-changed', bump);
+        window.removeEventListener('ohc-rotator-config-changed', bump);
+      } catch {}
+    };
+  }, []);
   
   // Filter out localOnly layers on hosted version
-  const getAvailableLayers = () => getAllLayers().filter(l => !l.localOnly || isLocalInstall);
+  const getAvailableLayers = () => {
+    // Reference integrationsRev so changes trigger a re-render pass.
+    void integrationsRev;
+    let n3fjpEnabled = false;
+    try { n3fjpEnabled = localStorage.getItem('ohc_n3fjp_enabled') === '1'; } catch {}
+
+    return getAllLayers().filter(l => {
+      if (l.localOnly && !isLocalInstall) return false;
+      // N3FJP is local-only + feature-gated (so hosted never shows it and local users must opt-in)
+      if (l.id === 'n3fjp_logged_qsos' && !n3fjpEnabled) return false;
+      return true;
+    });
+  };
   
   // Load map style from localStorage
   const getStoredMapSettings = () => {
@@ -334,7 +362,8 @@ export const WorldMap = ({
         const de = deRef.current;
         if (de?.lat != null && de?.lon != null) {
           const az = initialBearingDeg(de.lat, de.lon, e.latlng.lat, lon);
-          rotatorTurnRef.current(az);
+          // Never allow an async failure here to create an unhandled rejection.
+          Promise.resolve(rotatorTurnRef.current(az)).catch(() => {});
           return;
         }
       }
@@ -992,7 +1021,7 @@ export const WorldMap = ({
     } catch (err) {
       console.error('Plugin system error:', err);
     }
-  }, [pluginLayerStates]);
+  }, [pluginLayerStates, integrationsRev]);
 
   // Update PSKReporter markers
   useEffect(() => {
