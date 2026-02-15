@@ -1,0 +1,33 @@
+{
+  "name": "openhamclock-rig-listener",
+  "version": "1.0.0",
+  "description": "Direct USB/serial bridge between your radio and OpenHamClock — no flrig or rigctld needed",
+  "main": "rig-listener.js",
+  "bin": "rig-listener.js",
+  "scripts": {
+    "start": "node rig-listener.js",
+    "setup": "node rig-listener.js --wizard",
+    "mock": "node rig-listener.js --mock",
+    "build": "node build.js",
+    "build:win": "node build.js --platform win",
+    "build:mac": "node build.js --platform mac",
+    "build:linux": "node build.js --platform linux"
+  },
+  "pkg": {
+    "targets": ["node18"],
+    "outputPath": "dist",
+    "assets": [
+      "node_modules/@serialport/bindings-cpp/prebuilds/**/*"
+    ]
+  },
+  "dependencies": {
+    "serialport": "^12.0.0"
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^6.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}

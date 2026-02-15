@@ -4,10 +4,10 @@
  */
 import React, { useRef, useEffect, useState, useMemo } from 'react';
 import { MAP_STYLES } from '../utils/config.js';
-import { 
-  calculateGridSquare, 
-  getSunPosition, 
-  getMoonPosition, 
+import {
+  calculateGridSquare,
+  getSunPosition,
+  getMoonPosition,
   getGreatCirclePoints,
   replicatePath,
   replicatePoint,
@@ -20,7 +20,7 @@ import useLocalInstall from '../hooks/app/useLocalInstall.js';
 import { IconSatellite, IconTag, IconSun, IconMoon } from './Icons.jsx';
 import PluginLayer from './PluginLayer.jsx';
 import { DXNewsTicker } from './DXNewsTicker.jsx';
-import {filterDXPaths} from "../utils";
+import { filterDXPaths } from "../utils";
 
 // SECURITY: Escape HTML to prevent XSS in Leaflet popups/tooltips
 // DX cluster data, POTA/SOTA spots, and WSJT-X decodes come from external sources
@@ -36,27 +36,29 @@ function esc(str) {
 }
 
 
-export const WorldMap = ({ 
-  deLocation, 
-  dxLocation, 
+export const WorldMap = ({
+  deLocation,
+  dxLocation,
   onDXChange,
   dxLocked,
-  potaSpots, 
+  potaSpots,
   sotaSpots,
-  mySpots, 
-  dxPaths, 
-  dxFilters, 
-  satellites, 
+  mySpots,
+  dxPaths,
+  dxFilters,
+  satellites,
   pskReporterSpots,
   wsjtxSpots,
-  showDXPaths, 
-  showDXLabels, 
-  onToggleDXLabels, 
+  showDXPaths,
+  showDXLabels,
+  onToggleDXLabels,
   showPOTA,
   showPOTALabels = true,
   showSOTA,
   showPSKReporter,
   showWSJTX,
+  onToggleSatellites,
+  onSpotClick,
   hoveredSpot,
   callsign = 'N0CALL',
   showDXNews = true,
@@ -102,7 +104,7 @@ export const WorldMap = ({
     if (!deLocation?.lat || !deLocation?.lon) return '';
     return calculateGridSquare(deLocation.lat, deLocation.lon);
   }, [deLocation?.lat, deLocation?.lon]);
-  
+
   // Expose DE location to window for plugins (e.g., RBN)
   useEffect(() => {
     if (deLocation?.lat && deLocation?.lon) {
@@ -126,10 +128,10 @@ export const WorldMap = ({
   const pluginLayersRef = useRef({});
   const [pluginLayerStates, setPluginLayerStates] = useState({});
   const isLocalInstall = useLocalInstall();
-  
+
   // Filter out localOnly layers on hosted version
   const getAvailableLayers = () => getAllLayers().filter(l => !l.localOnly || isLocalInstall);
-  
+
   // Load map style from localStorage
   const getStoredMapSettings = () => {
     try {
@@ -153,22 +155,22 @@ export const WorldMap = ({
 
   // NASA GIBS Night Lights (VIIRS)
   const nightUrl = 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_CityLights_2012/default/2012-03-12/GoogleMapsCompatible_Level8/{z}/{y}/{x}.jpg';
-	
+
   // GIBS MODIS CODE
-  const [gibsOffset, setGibsOffset] = useState(0); 
+  const [gibsOffset, setGibsOffset] = useState(0);
 
   // Night overlay darkness (0-100 → fillOpacity 0.0-1.0)
   const [nightDarkness, setNightDarkness] = useState(() => {
     try { return parseInt(localStorage.getItem('ohc_nightDarkness')) || 60; } catch { return 60; }
   });
-  
+
   const getGibsUrl = (days) => {
     const date = new Date(Date.now() - (days * 24 + 12) * 60 * 60 * 1000);
     const dateStr = date.toISOString().split('T')[0];
     return `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${dateStr}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`;
   };
   // End GIBS MODIS CODE
-	
+
   const [mapView, setMapView] = useState({
     center: storedSettings.center || [20, 0],
     zoom: storedSettings.zoom || 2.5
@@ -178,7 +180,7 @@ export const WorldMap = ({
   const [mapLocked, setMapLocked] = useState(() => {
     try { return localStorage.getItem('openhamclock_mapLocked') === 'true'; } catch { return false; }
   });
-  
+
   const destinationPoint = (latDeg, lonDeg, bearingDeg, distanceDeg) => {
     const toRad = (d) => (d * Math.PI) / 180;
     const toDeg = (r) => (r * 180) / Math.PI;
@@ -260,7 +262,7 @@ export const WorldMap = ({
   useEffect(() => {
     // If map is already initialized, don't do it again
     if (!mapRef.current || mapInstanceRef.current) return;
-    
+
     const L = window.L;
     if (typeof L === 'undefined') {
       console.error('Leaflet not loaded');
@@ -285,7 +287,7 @@ export const WorldMap = ({
     map.createPane('nightPane');
     const nightPane = map.getPane('nightPane');
     nightPane.style.zIndex = 650;
-    nightPane.style.pointerEvents = 'none'; 
+    nightPane.style.pointerEvents = 'none';
     nightPane.id = 'night-lights-pane';
 
     // Initial tile layer (Base Day Map)
@@ -298,7 +300,7 @@ export const WorldMap = ({
     // Day/night terminator
     terminatorRef.current = createTerminator({
       resolution: 2,
-      fillOpacity: nightDarkness / 100, 
+      fillOpacity: nightDarkness / 100,
       fillColor: '#000010',
       color: '#ffaa00',
       weight: 2,
@@ -326,7 +328,7 @@ export const WorldMap = ({
         }
       }
     }, 60000);
-    
+
     map.on('moveend', () => {
       const center = map.getCenter();
       const zoom = map.getZoom();
@@ -418,14 +420,14 @@ export const WorldMap = ({
     }
 
     // Persist to localStorage
-    try { localStorage.setItem('openhamclock_mapLocked', mapLocked ? 'true' : 'false'); } catch {}
+    try { localStorage.setItem('openhamclock_mapLocked', mapLocked ? 'true' : 'false'); } catch { }
   }, [mapLocked]);
-	
+
   // Update tile layer and handle night light clipping
   useEffect(() => {
     if (!mapInstanceRef.current || !tileLayerRef.current) return;
     const map = mapInstanceRef.current;
-    
+
     // Remove old tile layer completely — setUrl() doesn't flush the tile cache,
     // leaving stale "Map data not yet available" tiles visible until zoom/pan.
     map.removeLayer(tileLayerRef.current);
@@ -445,28 +447,28 @@ export const WorldMap = ({
 
     // 3. Terminator Shadow (Gray Line) Set Color to transparent to hide terminator vertical lines at 180° and -180°
     if (terminatorRef.current) {
-        terminatorRef.current.setStyle({
-            fillOpacity: nightDarkness / 100, 
-            fillColor: '#000008',
-            color: 'transparent',
-            weight: 2
-        });
-        
-        if (typeof terminatorRef.current.bringToFront === 'function') {
-            terminatorRef.current.bringToFront();
-        }
+      terminatorRef.current.setStyle({
+        fillOpacity: nightDarkness / 100,
+        fillColor: '#000008',
+        color: 'transparent',
+        weight: 2
+      });
+
+      if (typeof terminatorRef.current.bringToFront === 'function') {
+        terminatorRef.current.bringToFront();
+      }
     }
-    
+
     // If you have a countries overlay, ensure it stays visible
     if (countriesLayerRef.current?.length) {
-      countriesLayerRef.current.forEach(l => { try { l.bringToFront(); } catch(e) {} });
+      countriesLayerRef.current.forEach(l => { try { l.bringToFront(); } catch (e) { } });
     }
 
     // 4. Handle Clipping Mask
     const updateMask = () => {
       const nightPane = document.getElementById('night-lights-pane');
       const terminatorPath = document.querySelector('.terminator-path');
-      
+
       if (nightPane && terminatorPath) {
         const pathData = terminatorPath.getAttribute('d');
         if (pathData) {
@@ -477,7 +479,7 @@ export const WorldMap = ({
     };
 
     updateMask();
-    const maskInterval = setInterval(updateMask, 3000); 
+    const maskInterval = setInterval(updateMask, 3000);
 
     return () => clearInterval(maskInterval);
   }, [mapStyle, gibsOffset]);
@@ -487,25 +489,25 @@ export const WorldMap = ({
     if (terminatorRef.current) {
       terminatorRef.current.setStyle({ fillOpacity: nightDarkness / 100 });
     }
-    try { localStorage.setItem('ohc_nightDarkness', String(nightDarkness)); } catch {}
+    try { localStorage.setItem('ohc_nightDarkness', String(nightDarkness)); } catch { }
   }, [nightDarkness]);
-  
+
   // End code dynamic GIBS generator if 'MODIS' is selected
 
   // Countries overlay for "Countries" map style
   useEffect(() => {
     if (!mapInstanceRef.current) return;
     const map = mapInstanceRef.current;
-    
+
     // Remove existing countries layers (all world copies)
     countriesLayerRef.current.forEach(layer => {
-      try { map.removeLayer(layer); } catch (e) {}
+      try { map.removeLayer(layer); } catch (e) { }
     });
     countriesLayerRef.current = [];
-    
+
     // Only add overlay for countries style
     if (!MAP_STYLES[mapStyle]?.countriesOverlay) return;
-    
+
     // Bright distinct colors for countries (designed for maximum contrast between neighbors)
     const COLORS = [
       '#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4',
@@ -514,7 +516,7 @@ export const WorldMap = ({
       '#000075', '#e6beff', '#ff6961', '#77dd77', '#fdfd96',
       '#84b6f4', '#fdcae1', '#c1e1c1', '#b39eb5', '#ffb347'
     ];
-    
+
     // Simple string hash for consistent color assignment
     const hashColor = (str) => {
       let hash = 0;
@@ -524,7 +526,7 @@ export const WorldMap = ({
       }
       return COLORS[Math.abs(hash) % COLORS.length];
     };
-    
+
     // Deep-shift all coordinates in a GeoJSON geometry by a longitude offset
     const shiftCoords = (coords, offset) => {
       if (typeof coords[0] === 'number') {
@@ -533,7 +535,7 @@ export const WorldMap = ({
       }
       return coords.map(c => shiftCoords(c, offset));
     };
-    
+
     const shiftGeoJSON = (geojson, offset) => {
       if (offset === 0) return geojson;
       return {
@@ -547,7 +549,7 @@ export const WorldMap = ({
         }))
       };
     };
-    
+
     // Fetch world countries GeoJSON (Natural Earth 110m simplified, ~240KB)
     fetch('https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json')
       .then(res => {
@@ -556,7 +558,7 @@ export const WorldMap = ({
       })
       .then(geojson => {
         if (!mapInstanceRef.current) return;
-        
+
         const styleFunc = (feature) => {
           const name = feature.properties?.name || feature.id || 'Unknown';
           return {
@@ -567,7 +569,7 @@ export const WorldMap = ({
             opacity: 0.8
           };
         };
-        
+
         // Create 3 world copies: left (-360), center (0), right (+360)
         for (const offset of [-360, 0, 360]) {
           const shifted = shiftGeoJSON(geojson, offset);
@@ -584,10 +586,10 @@ export const WorldMap = ({
               });
             } : undefined
           }).addTo(map);
-          
+
           countriesLayerRef.current.push(layer);
         }
-        
+
         // Ensure countries layers are below markers but above tiles
         countriesLayerRef.current.forEach(l => l.bringToBack());
         // Put tile layer behind countries
@@ -609,7 +611,7 @@ export const WorldMap = ({
           map.removeLayer(rotatorGlowRef.current);
           rotatorGlowRef.current = null;
         }
-      } catch {}
+      } catch { }
     };
   }, [mapStyle]);
 
@@ -715,25 +717,25 @@ export const WorldMap = ({
     // Add new DX paths if enabled
     if (showDXPaths && dxPaths && dxPaths.length > 0) {
       const filteredPaths = filterDXPaths(dxPaths, dxFilters);
-      
+
       filteredPaths.forEach((path) => {
         try {
           if (!path.spotterLat || !path.spotterLon || !path.dxLat || !path.dxLon) return;
           if (isNaN(path.spotterLat) || isNaN(path.spotterLon) || isNaN(path.dxLat) || isNaN(path.dxLon)) return;
-          
+
           const pathPoints = getGreatCirclePoints(
             path.spotterLat, path.spotterLon,
             path.dxLat, path.dxLon
           );
-          
+
           if (!pathPoints || !Array.isArray(pathPoints) || pathPoints.length === 0) return;
-          
+
           const freq = parseFloat(path.freq);
           const color = getBandColor(freq);
-          
-          const isHovered = hoveredSpot && 
-                           hoveredSpot.call?.toUpperCase() === path.dxCall?.toUpperCase();
-          
+
+          const isHovered = hoveredSpot &&
+            hoveredSpot.call?.toUpperCase() === path.dxCall?.toUpperCase();
+
           // Render polyline on all 3 world copies so it's visible across the dateline
           replicatePath(pathPoints).forEach(copy => {
             const line = L.polyline(copy, {
@@ -753,14 +755,20 @@ export const WorldMap = ({
               color: isHovered ? color : '#fff',
               weight: isHovered ? 3 : 1.5,
               opacity: 1,
-              fillOpacity: isHovered ? 1 : 0.9
+              fillOpacity: isHovered ? 1 : 0.9,
+              interactive: !!onSpotClick
             })
               .bindPopup(`<b data-qrz-call="${esc(path.dxCall)}" style="color: ${color}; cursor:pointer">${esc(path.dxCall)}</b><br>${esc(path.freq)} MHz<br>by <span data-qrz-call="${esc(path.spotter)}" style="cursor:pointer">${esc(path.spotter)}</span>`)
               .addTo(map);
+
+            if (onSpotClick) {
+              dxCircle.on('click', () => onSpotClick(path));
+            }
+
             if (isHovered) dxCircle.bringToFront();
             dxPathsMarkersRef.current.push(dxCircle);
           });
-          
+
           // Add label if enabled — replicate across world copies
           if (showDXLabels || isHovered) {
             const labelIcon = L.divIcon({
@@ -770,11 +778,16 @@ export const WorldMap = ({
               iconAnchor: [0, 0]
             });
             replicatePoint(path.dxLat, path.dxLon).forEach(([lat, lon]) => {
-              const label = L.marker([lat, lon], { 
-                icon: labelIcon, 
-                interactive: false,
+              const label = L.marker([lat, lon], {
+                icon: labelIcon,
+                interactive: !!onSpotClick,
                 zIndexOffset: isHovered ? 10000 : 0
               }).addTo(map);
+
+              if (onSpotClick) {
+                label.on('click', () => onSpotClick(path));
+              }
+
               dxPathsMarkersRef.current.push(label);
             });
           }
@@ -884,6 +897,11 @@ export const WorldMap = ({
             const marker = L.marker([lat, lon], { icon: triangleIcon })
               .bindPopup(`<b data-qrz-call="${esc(spot.call)}" style="color:#44cc44; cursor:pointer">${esc(spot.call)}</b><br><span style="color:#888">${esc(spot.ref)}</span> ${esc(spot.locationDesc || '')}<br>${spot.name ? `<i>${esc(spot.name)}</i><br>` : ''}${esc(spot.freq)} ${esc(spot.mode || '')} <span style="color:#888">${esc(spot.time || '')}</span>`)
               .addTo(map);
+
+            if (onSpotClick) {
+              marker.on('click', () => onSpotClick(spot));
+            }
+
             potaMarkersRef.current.push(marker);
           });
 
@@ -927,6 +945,11 @@ export const WorldMap = ({
             const marker = L.marker([lat, lon], { icon: diamondIcon })
               .bindPopup(`<b data-qrz-call="${esc(spot.call)}" style="color:#ff9632; cursor:pointer">${esc(spot.call)}</b><br><span style="color:#888">${esc(spot.ref)}</span>${spot.summit ? ` — ${esc(spot.summit)}` : ''}${spot.points ? ` <span style="color:#ff9632">(${esc(spot.points)}pt)</span>` : ''}<br>${esc(spot.freq)} ${esc(spot.mode || '')} <span style="color:#888">${esc(spot.time || '')}</span>`)
               .addTo(map);
+
+            if (onSpotClick) {
+              marker.on('click', () => onSpotClick(spot));
+            }
+
             sotaMarkersRef.current.push(marker);
           });
 
@@ -985,7 +1008,7 @@ export const WorldMap = ({
           opacity: pluginLayerStates[l.id]?.opacity ?? initialStates[l.id]?.opacity ?? l.defaultOpacity,
           config: pluginLayerStates[l.id]?.config ?? initialStates[l.id]?.config ?? l.config
         })),
-        
+
         toggleLayer: (id, enabled) => {
           const settings = getStoredMapSettings();
           const layers = settings.layers || {};
@@ -1006,21 +1029,21 @@ export const WorldMap = ({
           const settings = getStoredMapSettings();
           const layers = settings.layers || {};
           const currentLayer = layers[id] || {};
-          
+
           layers[id] = {
             ...currentLayer,
             config: { ...(currentLayer.config || {}), ...configDelta }
           };
-          
+
           localStorage.setItem('openhamclock_mapSettings', JSON.stringify({ ...settings, layers }));
-          
+
           setPluginLayerStates(prev => ({
             ...prev,
             [id]: { ...prev[id], config: { ...(prev[id]?.config || {}), ...configDelta } }
           }));
         }
       };
-		
+
     } catch (err) {
       console.error('Plugin system error:', err);
     }
@@ -1035,7 +1058,7 @@ export const WorldMap = ({
     pskMarkersRef.current = [];
 
     // Validate deLocation exists and has valid coordinates
-    const hasValidDE = deLocation && 
+    const hasValidDE = deLocation &&
       typeof deLocation.lat === 'number' && !isNaN(deLocation.lat) &&
       typeof deLocation.lon === 'number' && !isNaN(deLocation.lon);
 
@@ -1044,7 +1067,7 @@ export const WorldMap = ({
         // Validate spot coordinates are valid numbers
         let spotLat = parseFloat(spot.lat);
         let spotLon = parseFloat(spot.lon);
-        
+
         if (!isNaN(spotLat) && !isNaN(spotLon)) {
           // For TX spots (you transmitted → someone received): show the receiver (remote station)
           // For RX spots (someone transmitted → you received): show the sender (remote station)
@@ -1052,7 +1075,7 @@ export const WorldMap = ({
           const dirLabel = spot.direction === 'rx' ? 'RX' : 'TX';
           const freqMHz = spot.freqMHz || (spot.freq ? (spot.freq / 1000000).toFixed(3) : '?');
           const bandColor = getBandColor(parseFloat(freqMHz));
-          
+
           try {
             // Draw line from DE to spot location
             const points = getGreatCirclePoints(
@@ -1060,10 +1083,10 @@ export const WorldMap = ({
               spotLat, spotLon,
               50
             );
-            
+
             // Render polyline on all 3 world copies
-            if (points && Array.isArray(points) && points.length > 1 && 
-                points.every(p => Array.isArray(p) && !isNaN(p[0]) && !isNaN(p[1]))) {
+            if (points && Array.isArray(points) && points.length > 1 &&
+              points.every(p => Array.isArray(p) && !isNaN(p[0]) && !isNaN(p[1]))) {
               replicatePath(points).forEach(copy => {
                 const line = L.polyline(copy, {
                   color: bandColor,
@@ -1074,7 +1097,7 @@ export const WorldMap = ({
                 pskMarkersRef.current.push(line);
               });
             }
-            
+
             // Render circleMarker on all 3 world copies
             replicatePoint(spotLat, spotLon).forEach(([rLat, rLon]) => {
               const circle = L.circleMarker([rLat, rLon], {
@@ -1089,6 +1112,11 @@ export const WorldMap = ({
                 ${esc(spot.mode)} @ ${esc(freqMHz)} MHz<br>
                 ${spot.snr !== null ? `SNR: ${spot.snr > 0 ? '+' : ''}${spot.snr} dB` : ''}
               `).addTo(map);
+
+              if (onSpotClick) {
+                circle.on('click', () => onSpotClick(spot));
+              }
+
               pskMarkersRef.current.push(circle);
             });
           } catch (err) {
@@ -1107,7 +1135,7 @@ export const WorldMap = ({
     wsjtxMarkersRef.current.forEach(m => map.removeLayer(m));
     wsjtxMarkersRef.current = [];
 
-    const hasValidDE = deLocation && 
+    const hasValidDE = deLocation &&
       typeof deLocation.lat === 'number' && !isNaN(deLocation.lat) &&
       typeof deLocation.lon === 'number' && !isNaN(deLocation.lon);
 
@@ -1141,7 +1169,7 @@ export const WorldMap = ({
             );
 
             if (points && Array.isArray(points) && points.length > 1 &&
-                points.every(p => Array.isArray(p) && !isNaN(p[0]) && !isNaN(p[1]))) {
+              points.every(p => Array.isArray(p) && !isNaN(p[0]) && !isNaN(p[1]))) {
               // Render polyline on all 3 world copies
               replicatePath(points).forEach(copy => {
                 const line = L.polyline(copy, {
@@ -1174,6 +1202,11 @@ export const WorldMap = ({
                 ${esc(spot.grid || '')} ${esc(spot.band || '')}${spot.gridSource === 'prefix' ? ' <i>(est)</i>' : spot.gridSource === 'cache' ? ' <i>(prev)</i>' : ''}<br>
                 ${esc(spot.mode || '')} SNR: ${spot.snr != null ? (spot.snr >= 0 ? '+' : '') + spot.snr : '?'} dB
               `).addTo(map);
+
+              if (onSpotClick) {
+                diamond.on('click', () => onSpotClick(spot));
+              }
+
               wsjtxMarkersRef.current.push(diamond);
             });
           } catch (err) {
@@ -1295,8 +1328,8 @@ export const WorldMap = ({
           <div style={{ color: '#00ffcc', fontSize: '10px', fontFamily: 'JetBrains Mono' }}>
             {gibsOffset === 0 ? 'LATEST IMAGERY' : `${gibsOffset} DAYS AGO`}
           </div>
-          <input 
-            type="range" min="0" max="7" value={gibsOffset} 
+          <input
+            type="range" min="0" max="7" value={gibsOffset}
             onChange={(e) => setGibsOffset(parseInt(e.target.value))}
             style={{ cursor: 'pointer', width: '100px' }}
           />
@@ -1327,10 +1360,10 @@ export const WorldMap = ({
           <option key={key} value={key}>{style.name}</option>
         ))}
       </select>
-      
+
       {/* Satellite toggle */}
 
-      
+
       {/* Labels toggle */}
       {onToggleDXLabels && showDXPaths && Array.isArray(dxPaths) && dxPaths.length > 0 && (
         <button
@@ -1354,7 +1387,7 @@ export const WorldMap = ({
           ⊞ CALLS {showDXLabels ? 'ON' : 'OFF'}
         </button>
       )}
-      
+
       {/* DX News Ticker - left side of bottom bar */}
       {!hideOverlays && showDXNews && <DXNewsTicker />}
 
