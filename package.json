@@ -1,6 +1,6 @@
 {
   "name": "openhamclock",
-  "version": "15.4.1",
+  "version": "15.5.0",
   "description": "Amateur Radio Dashboard - A modern web-based HamClock alternative",
   "main": "electron/main.js",
   "scripts": {

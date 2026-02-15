@@ -883,7 +883,44 @@ export const SettingsPanel = ({ isOpen, onClose, config, onSave, onResetLayout, 
                 </div>
 
                 {rigEnabled && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '10px' }}>
+                  <>
+                    {/* Download Rig Listener */}
+                    <div style={{
+                      background: 'rgba(99,102,241,0.08)',
+                      border: '1px solid rgba(99,102,241,0.2)',
+                      borderRadius: '6px',
+                      padding: '10px',
+                      marginBottom: '12px',
+                    }}>
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '8px', lineHeight: 1.4 }}>
+                        📻 Download the Rig Listener for your computer. Double-click to run — it connects your radio to OpenHamClock via USB.
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        <a href="/api/rig/download/windows"
+                          style={{
+                            padding: '5px 12px', borderRadius: '4px', fontSize: '11px', fontWeight: '600',
+                            background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)',
+                            color: '#818cf8', textDecoration: 'none', cursor: 'pointer',
+                          }}>⊞ Windows</a>
+                        <a href="/api/rig/download/mac"
+                          style={{
+                            padding: '5px 12px', borderRadius: '4px', fontSize: '11px', fontWeight: '600',
+                            background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)',
+                            color: '#818cf8', textDecoration: 'none', cursor: 'pointer',
+                          }}> Mac</a>
+                        <a href="/api/rig/download/linux"
+                          style={{
+                            padding: '5px 12px', borderRadius: '4px', fontSize: '11px', fontWeight: '600',
+                            background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)',
+                            color: '#818cf8', textDecoration: 'none', cursor: 'pointer',
+                          }}>🐧 Linux</a>
+                      </div>
+                      <div style={{ fontSize: '9px', color: 'var(--text-muted)', marginTop: '6px', opacity: 0.7 }}>
+                        Supports Yaesu, Kenwood, Elecraft, and Icom radios. No extra software needed.
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '10px' }}>
                     <div>
                       <label style={{ display: 'block', marginBottom: '4px', color: 'var(--text-muted)', fontSize: '10px' }}>
                         {t('station.settings.rigControl.host')}
@@ -929,9 +966,7 @@ export const SettingsPanel = ({ isOpen, onClose, config, onSave, onResetLayout, 
                       />
                     </div>
                   </div>
-                )}
 
-                {rigEnabled && (
                   <div style={{ marginTop: '10px', display: 'flex', alignItems: 'center' }}>
                     <input
                       type="checkbox"
@@ -948,6 +983,7 @@ export const SettingsPanel = ({ isOpen, onClose, config, onSave, onResetLayout, 
                       </div>
                     </div>
                   </div>
+                  </>
                 )}
               </div>
             </div>

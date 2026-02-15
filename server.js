@@ -2510,6 +2510,7 @@ app.get('/api/pota/spots', async (req, res) => {
   try {
     // Return cached data if fresh
     if (potaCache.data && Date.now() - potaCache.timestamp < POTA_CACHE_TTL) {
+      res.set('Cache-Control', 'public, max-age=60, s-maxage=60');
       return res.json(potaCache.data);
     }
 
@@ -2559,6 +2560,7 @@ app.get('/api/sota/spots', async (req, res) => {
   try {
     // Return cached data if fresh
     if (sotaCache.data && Date.now() - sotaCache.timestamp < SOTA_CACHE_TTL) {
+      res.set('Cache-Control', 'public, max-age=90, s-maxage=90');
       return res.json(sotaCache.data);
     }
 
@@ -11572,6 +11574,247 @@ app.get('/api/wsjtx/relay/download/:platform', (req, res) => {
 
 // CONTEST LOGGER UDP + API (N1MM / DXLog)
 // ============================================
+
+// ── RIG LISTENER DOWNLOAD ─────────────────────────────────
+// Serves the rig-listener.js agent and generates one-click launcher scripts
+// that auto-download portable Node.js + serialport. User double-clicks → wizard runs.
+
+app.get('/api/rig/listener.js', (req, res) => {
+  const listenerPath = path.join(__dirname, 'rig-listener', 'rig-listener.js');
+  try {
+    const js = fs.readFileSync(listenerPath, 'utf8');
+    res.setHeader('Content-Type', 'application/javascript');
+    res.send(js);
+  } catch (e) {
+    res.status(500).json({ error: 'rig-listener.js not found on server' });
+  }
+});
+
+app.get('/api/rig/package.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.json({
+    name: 'ohc-rig',
+    version: '1.0.0',
+    dependencies: { serialport: '^12.0.0' },
+  });
+});
+
+app.get('/api/rig/download/:platform', (req, res) => {
+  const platform = req.params.platform;
+  if (!['linux', 'mac', 'windows'].includes(platform)) {
+    return res
+      .status(400)
+      .json({ error: 'Invalid platform. Use: linux, mac, or windows' });
+  }
+
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  const serverURL = (proto + '://' + host).replace(
+    /[^a-zA-Z0-9._\-:\/\@]/g,
+    '',
+  );
+
+  if (platform === 'windows') {
+    const NODE_VERSION = 'v22.13.1';
+    const NODE_ZIP = 'node-' + NODE_VERSION + '-win-x64.zip';
+    const NODE_DIR = 'node-' + NODE_VERSION + '-win-x64';
+    const NODE_URL = 'https://nodejs.org/dist/' + NODE_VERSION + '/' + NODE_ZIP;
+
+    const bat =
+      [
+        '@echo off',
+        'setlocal',
+        'title OpenHamClock Rig Listener',
+        'echo.',
+        'echo  =========================================',
+        'echo   OpenHamClock Rig Listener v1.0',
+        'echo  =========================================',
+        'echo.',
+        '',
+        ':: Persistent install folder next to this .bat',
+        'set "RIG_DIR=%~dp0openhamclock-rig"',
+        'if not exist "%RIG_DIR%" mkdir "%RIG_DIR%"',
+        '',
+        ':: ---- Node.js ----',
+        'set "NODE_EXE=node"',
+        'set "NPM_EXE=npm"',
+        'set "PORTABLE_DIR=%RIG_DIR%\\.node"',
+        '',
+        'where node >nul 2>nul',
+        'if not errorlevel 1 (',
+        '    for /f "tokens=*" %%i in (\'node -v\') do echo   Found Node.js %%i',
+        '    goto :have_node',
+        ')',
+        '',
+        'if exist "%PORTABLE_DIR%\\' + NODE_DIR + '\\node.exe" (',
+        '    set "NODE_EXE=%PORTABLE_DIR%\\' + NODE_DIR + '\\node.exe"',
+        '    set "NPM_EXE=%PORTABLE_DIR%\\' + NODE_DIR + '\\npm.cmd"',
+        '    echo   Found portable Node.js',
+        '    goto :have_node',
+        ')',
+        '',
+        'echo   Node.js not found. Downloading portable version...',
+        'echo   (One-time ~30MB download)',
+        'echo.',
+        'if not exist "%PORTABLE_DIR%" mkdir "%PORTABLE_DIR%"',
+        '',
+        'powershell -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri \'' +
+          NODE_URL +
+          "' -OutFile '%PORTABLE_DIR%\\" +
+          NODE_ZIP +
+          '\' } catch { Write-Host $_.Exception.Message; exit 1 }"',
+        'if errorlevel 1 (',
+        '    echo   Failed to download Node.js! Check your internet connection.',
+        '    pause',
+        '    exit /b 1',
+        ')',
+        '',
+        'echo   Extracting...',
+        'powershell -Command "Expand-Archive -Path \'%PORTABLE_DIR%\\' +
+          NODE_ZIP +
+          "' -DestinationPath '%PORTABLE_DIR%' -Force\"",
+        'del "%PORTABLE_DIR%\\' + NODE_ZIP + '" >nul 2>nul',
+        'set "NODE_EXE=%PORTABLE_DIR%\\' + NODE_DIR + '\\node.exe"',
+        'set "NPM_EXE=%PORTABLE_DIR%\\' + NODE_DIR + '\\npm.cmd"',
+        'echo   Node.js ready.',
+        'echo.',
+        '',
+        ':have_node',
+        '',
+        ':: Add portable node dir to PATH so npm child scripts can find "node"',
+        'for %%F in ("%NODE_EXE%") do set "NODE_DIR=%%~dpF"',
+        'set "PATH=%NODE_DIR%;%PATH%"',
+        '',
+        ':: ---- Download rig-listener.js ----',
+        'echo   Downloading rig listener...',
+        'powershell -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri \'' +
+          serverURL +
+          "/api/rig/listener.js' -OutFile '%RIG_DIR%\\rig-listener.js' } catch { Write-Host $_.Exception.Message; exit 1 }\"",
+        'if errorlevel 1 (',
+        '    echo   Failed to download rig listener!',
+        '    pause',
+        '    exit /b 1',
+        ')',
+        '',
+        ':: ---- package.json (always refresh) ----',
+        'powershell -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri \'' +
+          serverURL +
+          "/api/rig/package.json' -OutFile '%RIG_DIR%\\package.json' } catch { Write-Host $_.Exception.Message; exit 1 }\"",
+        '',
+        ':: ---- npm install (one-time) ----',
+        'if not exist "%RIG_DIR%\\node_modules\\serialport" (',
+        '    echo.',
+        '    echo   Installing serial port driver... (one-time, ~30 seconds)',
+        '    echo.',
+        '    pushd "%RIG_DIR%"',
+        '    call "%NPM_EXE%" install --loglevel=error 2>&1',
+        '    popd',
+        '    if not exist "%RIG_DIR%\\node_modules\\serialport" (',
+        '        echo.',
+        '        echo   Failed to install serialport!',
+        '        echo.',
+        '        pause',
+        '        exit /b 1',
+        '    )',
+        '    echo   Serial port driver installed.',
+        ')',
+        '',
+        'echo.',
+        'echo   Starting rig listener...',
+        'echo   (Close this window to stop)',
+        'echo.',
+        '',
+        '"%NODE_EXE%" "%RIG_DIR%\\rig-listener.js"',
+        '',
+        'echo.',
+        'echo   Rig listener stopped.',
+        'echo.',
+        'pause',
+      ].join('\r\n') + '\r\n';
+
+    res.setHeader('Content-Type', 'application/x-msdos-program');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="OpenHamClock-Rig-Listener.bat"',
+    );
+    return res.send(bat);
+  } else {
+    // Linux / Mac
+    const filename =
+      platform === 'mac'
+        ? 'OpenHamClock-Rig-Listener.command'
+        : 'OpenHamClock-Rig-Listener.sh';
+    const rigDir = '$HOME/openhamclock-rig';
+
+    const sh =
+      [
+        '#!/bin/bash',
+        '# OpenHamClock Rig Listener — Download and Run',
+        '# Double-click (Mac) or: bash ' + filename,
+        '',
+        'set -e',
+        '',
+        'echo ""',
+        'echo "  ========================================="',
+        'echo "   OpenHamClock Rig Listener v1.0"',
+        'echo "  ========================================="',
+        'echo ""',
+        '',
+        '# Check for Node.js',
+        'if ! command -v node &> /dev/null; then',
+        '    echo "  Node.js is not installed."',
+        '    echo ""',
+        '    echo "  Install it:"',
+        platform === 'mac'
+          ? '    echo "    brew install node    (if you have Homebrew)"'
+          : '    echo "    sudo apt install nodejs npm    (Debian/Ubuntu)"',
+        '    echo "    Or download from https://nodejs.org"',
+        '    echo ""',
+        '    exit 1',
+        'fi',
+        '',
+        'echo "  Found Node.js $(node -v)"',
+        '',
+        '# Create persistent folder',
+        'RIG_DIR="' + rigDir + '"',
+        'mkdir -p "$RIG_DIR"',
+        '',
+        '# Download latest rig-listener.js',
+        'echo "  Downloading rig listener..."',
+        'curl -sL "' +
+          serverURL +
+          '/api/rig/listener.js" -o "$RIG_DIR/rig-listener.js"',
+        '',
+        '# package.json (always refresh)',
+        'curl -sL "' +
+          serverURL +
+          '/api/rig/package.json" -o "$RIG_DIR/package.json"',
+        '',
+        '# npm install (one-time)',
+        'if [ ! -d "$RIG_DIR/node_modules/serialport" ]; then',
+        '  echo ""',
+        '  echo "  Installing serial port driver... (one-time, ~30 seconds)"',
+        '  cd "$RIG_DIR" && npm install --loglevel=error',
+        '  echo "  Done."',
+        'fi',
+        '',
+        'echo ""',
+        'echo "  Starting rig listener..."',
+        'echo "  Press Ctrl+C to stop."',
+        'echo ""',
+        '',
+        'cd "$RIG_DIR"',
+        'exec node rig-listener.js',
+      ].join('\n') + '\n';
+
+    res.setHeader('Content-Type', 'application/x-sh');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename="' + filename + '"',
+    );
+    return res.send(sh);
+  }
+});
 
 const N1MM_UDP_PORT = parseInt(process.env.N1MM_UDP_PORT || '12060');
 const N1MM_ENABLED = process.env.N1MM_UDP_ENABLED === 'true';

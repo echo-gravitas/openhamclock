@@ -51,6 +51,9 @@ COPY config.js ./
 # Copy WSJT-X relay agent (served as download to users)
 COPY wsjtx-relay ./wsjtx-relay
 
+# Copy Rig Listener agent (served as download to users)
+COPY rig-listener/rig-listener.js ./rig-listener/rig-listener.js
+
 # Copy built frontend from builder stage
 COPY --from=builder /app/dist ./dist
 

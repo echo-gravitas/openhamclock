@@ -10,6 +10,43 @@ import { useState, useEffect } from 'react';
 // Each entry: { version, date, heading, features: [...] }
 const CHANGELOG = [
   {
+    version: '15.5.0',
+    date: '2026-02-15',
+    heading: 'Click a spot. Tune your radio. Just like that.',
+    features: [
+      {
+        icon: '📻',
+        title: 'Direct Rig Control',
+        desc: 'Click any DX cluster spot, POTA activation, or WSJT-X decode and your radio tunes instantly. Supports Yaesu, Kenwood, Elecraft, and Icom radios — no flrig or rigctld needed.'
+      },
+      {
+        icon: '⬇️',
+        title: 'One-Click Rig Listener Download',
+        desc: 'Enable Rig Control in Settings and download the Rig Listener for Windows, Mac, or Linux. Double-click to run — it auto-installs everything. No Node.js, no command line, no setup headaches.'
+      },
+      {
+        icon: '🔌',
+        title: 'Interactive Setup Wizard',
+        desc: 'The Rig Listener detects your USB serial ports, asks your radio brand and model, saves the config, and connects. First run is a 30-second wizard — after that, just double-click to start.'
+      },
+      {
+        icon: '🔄',
+        title: 'Live Frequency & Mode Display',
+        desc: 'Your radio\'s current frequency and mode are shown in real time on the dashboard. Polls every 500ms over USB so the display always matches your dial.'
+      },
+      {
+        icon: '🌙',
+        title: 'Night Darkness Slider',
+        desc: 'Adjust how dark the nighttime shading appears on the map. Slide from subtle to dramatic — find the look that works for your setup. Located below the map lock toggle.'
+      },
+      {
+        icon: '👁️',
+        title: 'Hosted User Cleanup',
+        desc: 'Rotator panel and local-only features are now hidden for hosted users — cleaner interface, no confusing controls that don\'t apply to your setup.'
+      },
+    ]
+  },
+  {
     version: '15.4.1',
     date: '2026-02-15',
     heading: "Tonight's a big one — here's what's new:",

@@ -11,7 +11,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useVisibilityRefresh } from './useVisibilityRefresh';
 import { apiFetch } from '../utils/apiFetch';
 
-const POLL_INTERVAL = 2000; // Poll every 2 seconds for near-real-time feel
+const POLL_FAST = 2000;    // 2s when data is flowing
+const POLL_SLOW = 30000;   // 30s idle check — is anything connected?
 const API_URL = '/api/wsjtx';
 const DECODES_URL = '/api/wsjtx/decodes';
 
@@ -51,6 +52,7 @@ export function useWSJTX(enabled = true) {
   const lastTimestamp = useRef(0);
   const fullFetchCounter = useRef(0);
   const backoffUntil = useRef(0); // Rate-limit backoff timestamp
+  const hasDataFlowing = useRef(false); // True when relay/UDP is active
 
   // Lightweight poll - just new decodes since last check
   const pollDecodes = useCallback(async () => {
@@ -107,6 +109,12 @@ export function useWSJTX(enabled = true) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       setData(json);
+      // Data is flowing if there are active clients or recent decodes
+      hasDataFlowing.current = !!(json.enabled && (
+        (json.stats?.activeClients > 0) ||
+        (json.decodes?.length > 0) ||
+        (json.qsos?.length > 0)
+      ));
       lastTimestamp.current = Date.now();
       setLoading(false);
       setError(null);
@@ -121,21 +129,25 @@ export function useWSJTX(enabled = true) {
     if (enabled) fetchFull();
   }, [enabled, fetchFull]);
 
-  // Polling - mostly lightweight, full refresh every 15s
+  // Polling - adaptive: fast (2s) when data flows, slow (30s) when idle
   useEffect(() => {
     if (!enabled) return;
     
-    const interval = setInterval(() => {
+    let timer;
+    const tick = () => {
+      const interval = hasDataFlowing.current ? POLL_FAST : POLL_SLOW;
       fullFetchCounter.current++;
-      if (fullFetchCounter.current >= 8) { // Every ~16 seconds
+      if (fullFetchCounter.current >= 8) { // Full refresh every ~16s (fast) or ~240s (slow)
         fullFetchCounter.current = 0;
         fetchFull();
       } else {
         pollDecodes();
       }
-    }, POLL_INTERVAL);
+      timer = setTimeout(tick, interval);
+    };
+    timer = setTimeout(tick, POLL_SLOW); // Start slow, speed up if data arrives
     
-    return () => clearInterval(interval);
+    return () => clearTimeout(timer);
   }, [enabled, fetchFull, pollDecodes]);
 
   // Refresh immediately when tab becomes visible (handles browser throttling)
