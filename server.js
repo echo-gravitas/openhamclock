@@ -5662,7 +5662,7 @@ app.get('/api/satellites/tle', async (req, res) => {
 	// C. Live Fetching (Only runs if OFFLINE_MODE is false or file is missing)
     logDebug('[Satellites] Fetching fresh TLE data from CelesTrak...');
 	
-	// --- COMMENT OUT THE START OF THE FETCH LOGIC IF TESTING SO AS TO NOT PULL FROM CELSTRACK TOO OFTEN AND const OFFLINE_MODE = false; // Set to false when you want live data again ---
+	 // --- COMMENT OUT THE START OF THE FETCH LOGIC IF TESTING SO AS TO NOT PULL FROM CELSTRACK TOO OFTEN AND const OFFLINE_MODE = false; // Set to false when you want live data again ---
     logDebug('[Satellites] Fetching fresh TLE data from multiple groups...');
     const tleData = {}; // Declare this exactly once to avoid SyntaxErrors
     
@@ -5742,8 +5742,10 @@ app.get('/api/satellites/tle', async (req, res) => {
     }
 
     tleCache = { data: tleData, timestamp: now };
+
 	// --- END OF COMMENTED OUT FETCH LOGIC --- 
     res.json(tleData);
+	
   } catch (error) {
     // Return stale cache or empty if everything fails
     res.json(tleCache.data || {});

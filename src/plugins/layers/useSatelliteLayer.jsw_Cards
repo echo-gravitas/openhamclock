@@ -26,7 +26,6 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
     const saved = sessionStorage.getItem('selected_satellites');
     return saved ? JSON.parse(saved) : [];
   });
-  const [winPos, setWinPos] = useState({ top: 50, right: 10 });
 
   // Sync to session storage
   useEffect(() => {
@@ -110,11 +109,13 @@ export const useLayer = ({ map, enabled, satellites, setSatellites, opacity, con
     }
   };
 
-const updateInfoWindow = () => {
+	const updateInfoWindow = () => {
     const winId = 'sat-data-window';
     const container = map.getContainer();
     let win = container.querySelector(`#${winId}`);
 
+    // --- 1. THE AUTO-CLEANUP FIX ---
+    // If no satellites are selected, kill the window immediately and exit
     if (!selectedSats || selectedSats.length === 0) {
       if (win) win.remove();
       return;
@@ -126,6 +127,8 @@ const updateInfoWindow = () => {
       win.className = 'sat-data-window leaflet-bar';
       Object.assign(win.style, {
         position: 'absolute',
+        top: '50px',
+        right: '10px',
         width: '260px',
         maxHeight: 'calc(100% - 80px)',
         backgroundColor: 'rgba(0, 15, 15, 0.95)',
@@ -137,61 +140,20 @@ const updateInfoWindow = () => {
         overflowY: 'auto',
         fontFamily: 'monospace',
         pointerEvents: 'auto',
-        boxShadow: '0 0 15px rgba(0,0,0,0.7)',
-        cursor: 'default'
+        boxShadow: '0 0 15px rgba(0,0,0,0.7)'
       });
       container.appendChild(win);
-
-      let isDragging = false;
-
-      win.onmousedown = (e) => {
-        if (e.ctrlKey) {
-          isDragging = true;
-          win.style.cursor = 'move';
-          // --- STOP MAP DRAGGING ---
-          if (map.dragging) map.dragging.disable(); 
-          e.preventDefault();
-          e.stopPropagation();
-        }
-      };
-
-      window.onmousemove = (e) => {
-        if (!isDragging) return;
-        const rect = container.getBoundingClientRect();
-        const x = rect.right - e.clientX;
-        const y = e.clientY - rect.top;
-
-        win.style.right = `${x - 10}px`;
-        win.style.top = `${y - 10}px`;
-      };
-
-      window.onmouseup = () => {
-        if (isDragging) {
-          isDragging = false;
-          win.style.cursor = 'default';
-          // --- RE-ENABLE MAP DRAGGING ---
-          if (map.dragging) map.dragging.enable();
-          
-          setWinPos({
-            top: parseInt(win.style.top),
-            right: parseInt(win.style.right)
-          });
-        }
-      };
     }
-
-    win.style.top = `${winPos.top}px`;
-    win.style.right = `${winPos.right}px`;
 
     const activeSats = satellites.filter(s => selectedSats.includes(s.name));
 
+    // --- 2. ADDED "CLEAR ALL" BUTTON ---
     const clearAllBtn = `
-      <div style="margin-bottom: 12px; border-bottom: 2px solid #004444; padding-bottom: 8px; display: flex; flex-direction: column; align-items: center; gap: 5px;">
+      <div style="margin-bottom: 12px; border-bottom: 2px solid #004444; padding-bottom: 8px; display: flex; justify-content: center;">
         <button onclick="sessionStorage.removeItem('selected_satellites'); window.location.reload();" 
                 style="background: #440000; border: 1px solid #ff4444; color: #ff4444; cursor: pointer; padding: 4px 10px; font-size: 10px; border-radius: 3px; font-weight: bold;">
           CLEAR ALL FOOTPRINTS
         </button>
-        <span style="font-size: 9px; color: #888;">Ctrl + Drag to move this box</span>
       </div>
     `;
 
