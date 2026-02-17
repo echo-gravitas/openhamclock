@@ -20,7 +20,13 @@ export const useSOTASpots = () => {
 
           // Map SOTA API response to our standard spot format
           const mapped = (Array.isArray(spots) ? spots : [])
-            .filter(s => s.activatorCallsign)
+            .filter(s => {
+              if (! (s.activatorCallsign && s.frequency)) return false;
+              // Filter out QRT (operator signed off)
+              const comments = (s.comments || '').toUpperCase().trim();
+              if (comments === 'QRT' || comments.startsWith('QRT ') || comments.startsWith('QRT,')) return false;
+              return true;
+            })
             .map(s => {
               // summitDetails often contains lat/lng from the SOTA DB
               const details = s.summitDetails || {};
@@ -43,9 +49,12 @@ export const useSOTASpots = () => {
                 comments: s.comments || '',
                 lat,
                 lon,
-                time: s.timeStamp
-                  ? new Date(s.timeStamp).toISOString().substr(11, 5) + 'z'
-                  : ''
+                // SOTA API returns UTC timestamps without 'Z' suffix, violating ISO 8601
+                // Defensively append 'Z' if not present to force UTC interpretation
+                time: s.timeStamp ? (() => {
+                  const ts = s.timeStamp.endsWith('Z') || s.timeStamp.endsWith('z') ? s.timeStamp : s.timeStamp + 'Z';
+                  return new Date(ts).toISOString().substr(11, 5) + 'z';
+                })() : ''
               };
             });
 

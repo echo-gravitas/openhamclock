@@ -28,6 +28,7 @@ const dgram = require('dgram');
 const fs = require('fs');
 const { execFile, spawn } = require('child_process');
 const mqttLib = require('mqtt');
+const { initCtyData, getCtyData, lookupCall } = require('./src/server/ctydat.js');
 
 // Read version from package.json as single source of truth
 const APP_VERSION = (() => {
@@ -39,6 +40,10 @@ const APP_VERSION = (() => {
 
 // Global safety nets — log but don't crash on stray errors (e.g. MQTT connack timeout)
 process.on('uncaughtException', (err) => {
+  // BadRequestError: request aborted — benign, just a client disconnecting mid-request
+  if (err.type === 'request.aborted' || (err.name === 'BadRequestError' && err.message === 'request aborted')) {
+    return; // Silently ignore — not a real crash
+  }
   console.error(`[FATAL] Uncaught exception: ${err.message}`);
   console.error(err.stack);
   // Exit on truly fatal errors, but give time to flush logs
@@ -852,7 +857,7 @@ function getStatsFilePath() {
 }
 
 const STATS_FILE = getStatsFilePath();
-const STATS_SAVE_INTERVAL = 60000; // Save every 60 seconds
+const STATS_SAVE_INTERVAL = 5 * 60 * 1000; // Save every 5 minutes (was 60s — too frequent with large geoIPCache)
 
 // Load persistent stats from disk
 function loadVisitorStats() {
@@ -890,7 +895,11 @@ function loadVisitorStats() {
         totalRequestsToday: data.today === new Date().toISOString().slice(0, 10) ? (data.totalRequestsToday || 0) : 0,
         allTimeVisitors: data.allTimeVisitors || 0,
         allTimeRequests: data.allTimeRequests || 0,
-        allTimeUniqueIPs: data.allTimeUniqueIPs || [],
+        // Reconstruct from geoIPCache keys (covers ~99% of IPs) + any legacy array
+        allTimeUniqueIPs: [...new Set([
+          ...(data.allTimeUniqueIPs || []),
+          ...Object.keys(data.geoIPCache || {})
+        ])],
         serverFirstStarted: data.serverFirstStarted || defaults.serverFirstStarted,
         lastDeployment: new Date().toISOString(),
         deploymentCount: (data.deploymentCount || 0) + 1,
@@ -920,12 +929,18 @@ function saveVisitorStats() {
       fs.mkdirSync(dir, { recursive: true });
     }
     
+    // Don't persist allTimeUniqueIPs array — it grows forever and can be
+    // reconstructed from geoIPCache keys on restart. Save memory.
+    // Reconstruct geoIPCache from Map only at save time (not kept in memory as duplicate).
     const data = {
       ...visitorStats,
+      allTimeUniqueIPs: undefined, // Exclude from JSON — reconstructed on load
+      geoIPCache: Object.fromEntries(geoIPCache), // Rebuild from Map for persistence only
       lastSaved: new Date().toISOString()
     };
     
-    fs.writeFileSync(STATS_FILE, JSON.stringify(data, null, 2));
+    // Use compact JSON (no pretty-print) to avoid multi-MB temporary strings
+    fs.writeFileSync(STATS_FILE, JSON.stringify(data));
     visitorStats.lastSaved = data.lastSaved; // Update in-memory too
     saveErrorCount = 0; // Reset on success
     // Only log occasionally to avoid spam
@@ -950,6 +965,10 @@ const visitorStats = loadVisitorStats();
 // Convert today's IPs to a Set for fast lookup
 const todayIPSet = new Set(visitorStats.uniqueIPsToday);
 const allTimeIPSet = new Set(visitorStats.allTimeUniqueIPs);
+const MAX_TRACKED_IPS = 100000; // Stop tracking individual IPs after this (just count)
+
+// Free the array — Set is the authoritative source now, array is no longer persisted
+visitorStats.allTimeUniqueIPs = [];
 
 // ============================================
 // GEO-IP COUNTRY RESOLUTION
@@ -964,6 +983,10 @@ if (!visitorStats.countryStatsToday) visitorStats.countryStatsToday = {}; // Res
 if (!visitorStats.geoIPCache) visitorStats.geoIPCache = {};              // { "1.2.3.4": "US", ... }
 
 const geoIPCache = new Map(Object.entries(visitorStats.geoIPCache));      // ip -> countryCode
+
+// Free the plain object — Map is the authoritative runtime source.
+// Reconstructed from Map only at save time to avoid double memory.
+delete visitorStats.geoIPCache;
 const geoIPQueue = new Set();                                             // IPs pending lookup
 let geoIPLastBatch = 0;
 const GEOIP_BATCH_INTERVAL = 30 * 1000;  // Resolve every 30 seconds
@@ -993,8 +1016,10 @@ function queueGeoIPLookup(ip) {
  */
 function recordCountry(ip, countryCode) {
   if (!countryCode || countryCode === 'Unknown') return;
-  geoIPCache.set(ip, countryCode);
-  visitorStats.geoIPCache[ip] = countryCode;
+  // Only cache individual IP→country mappings up to the cap
+  if (geoIPCache.size < MAX_TRACKED_IPS || geoIPCache.has(ip)) {
+    geoIPCache.set(ip, countryCode);
+  }
   
   // All-time stats
   visitorStats.countryStats[countryCode] = (visitorStats.countryStats[countryCode] || 0) + 1;
@@ -1327,8 +1352,10 @@ app.use((req, res, next) => {
     // Track all-time unique visitors
     const isNewAllTime = !allTimeIPSet.has(ip);
     if (isNewAllTime) {
-      allTimeIPSet.add(ip);
-      visitorStats.allTimeUniqueIPs.push(ip);
+      // Only track individual IPs up to the cap (prevents unbounded memory growth)
+      if (allTimeIPSet.size < MAX_TRACKED_IPS) {
+        allTimeIPSet.add(ip);
+      }
       visitorStats.allTimeVisitors++;
       queueGeoIPLookup(ip);
       logInfo(`[Stats] New visitor (#${visitorStats.uniqueIPsToday.length} today, #${visitorStats.allTimeVisitors} all-time) from ${ip.replace(/\d+$/, 'x')}`);
@@ -1365,8 +1392,22 @@ setInterval(() => {
     spotBufferEntries: pskMqtt.spotBuffer.size,
     spotBufferTotal: [...pskMqtt.spotBuffer.values()].reduce((n, b) => n + b.length, 0),
   };
-  console.log(`[Memory] RSS=${mb(mem.rss)}MB Heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB External=${mb(mem.external)}MB | MQTT: ${mqttStats.sseClients} SSE clients, ${mqttStats.subscribedCalls} calls, ${mqttStats.recentSpotsTotal} recent spots (${mqttStats.recentSpotsEntries} entries), ${mqttStats.spotBufferTotal} buffered | GeoIP=${geoIPCache.size} MySpots=${mySpotsCache.size} AllTimeIPs=${allTimeIPSet.size}`);
+  console.log(`[Memory] RSS=${mb(mem.rss)}MB Heap=${mb(mem.heapUsed)}/${mb(mem.heapTotal)}MB External=${mb(mem.external)}MB | MQTT: ${mqttStats.sseClients} SSE clients, ${mqttStats.subscribedCalls} calls, ${mqttStats.recentSpotsTotal} recent spots (${mqttStats.recentSpotsEntries} entries), ${mqttStats.spotBufferTotal} buffered | GeoIP=${geoIPCache.size} CallLookup=${callsignLookupCache?.size || 0} LocCache=${callsignLocationCache?.size || 0} MySpots=${mySpotsCache.size} AllTimeIPs=${allTimeIPSet.size} RBN=${rbnSpotsByDX?.size || 0}`);
 }, 15 * 60 * 1000);
+
+// Periodic GC compaction — helps V8 release fragmented old-space memory
+// Without this, long-running processes slowly accumulate unreclaimable heap
+setInterval(() => {
+  if (typeof global.gc === 'function') {
+    const before = process.memoryUsage().heapUsed;
+    global.gc();
+    const after = process.memoryUsage().heapUsed;
+    const freed = ((before - after) / 1024 / 1024).toFixed(1);
+    if (freed > 5) {
+      console.log(`[GC] Compaction freed ${freed}MB (${(before / 1024 / 1024).toFixed(0)}MB → ${(after / 1024 / 1024).toFixed(0)}MB)`);
+    }
+  }
+}, 30 * 60 * 1000); // Every 30 minutes
 
 // ============================================
 // AUTO UPDATE (GIT)
@@ -2200,6 +2241,50 @@ app.get('/api/wwff/spots', async (req, res) => {
 // SOTA cache (2 minutes)
 let sotaCache = { data: null, timestamp: 0 };
 const SOTA_CACHE_TTL = 2 * 60 * 1000; // 2 minutes
+let sotaSummits = { data: null, timestamp: 0};
+const SOTASUMMITS_CACHE_TTL = 24 * 60 * 60 * 1000; // 1 day
+
+// SOTA Summits
+// SOTA publishes a CSV of the Summit detail every day. Save this into
+// a cache so we can look it up when loading the spots.
+
+async function checkSummitCache() {
+  const now = Date.now();
+  try {
+    if (sotaSummits.data && (now - sotaSummits.timestamp) < SOTASUMMITS_CACHE_TTL) {
+      return;
+    }
+    logDebug('[SOTA] Refreshing sotaSummits');
+    const response = await fetch('https://storage.sota.org.uk/summitslist.csv');
+    const data = await response.text();
+    const rows = data.trim().split('\n');
+    rows.shift(); // discard the title line
+    const headers = rows.shift().split(',').map(header => header.trim());
+    let summit = {};
+
+    rows.forEach(row => {
+      values = row.split(',').map(value => value.trim());
+      const obj = {};
+      headers.forEach((header, index) => {
+        obj[header] = values[index].replace(/"/g, '');
+      });
+      summit[obj['SummitCode']] = {
+        latitude: obj['Latitude'],
+        longitude: obj['Longitude'],
+        name: obj['SummitName'],
+        altM: obj['AltM'],
+        points: obj['Points']
+      };
+    });
+    sotaSummits = {
+      data: summit,
+      timestamp: now
+    }
+  } catch(error) {
+    logErrorOnce('[SOTA]', error.message);
+  }
+}
+checkSummitCache(); // Prime the sotaSummits cache
 
 // SOTA Spots
 app.get('/api/sota/spots', async (req, res) => {
@@ -2209,9 +2294,23 @@ app.get('/api/sota/spots', async (req, res) => {
       res.set('Cache-Control', 'public, max-age=90, s-maxage=90');
       return res.json(sotaCache.data);
     }
-    
+
+    checkSummitCache(); // Updates sotaSummits if required
+
     const response = await fetch('https://api2.sota.org.uk/api/spots/50/all');
     const data = await response.json();
+
+    if (sotaSummits.data) {
+      // If we have data in the sotaSummits cache, use it to populate summitDetails.
+      data.map(s => {
+        const summit = `${s.associationCode}/${s.summitCode}`;
+        s.summitDetails = sotaSummits.data[summit];
+      });
+    }
+    if (Array.isArray(data) && data.length > 0) {
+      const sample = data[0];
+      logDebug('[SOTA] API returned', data.length, 'spots. Sample fields:', Object.keys(sample).join(', '));
+    }
     
     // Cache the response
     sotaCache = { data, timestamp: Date.now() };
@@ -2877,7 +2976,7 @@ app.get('/api/dxcluster/paths', async (req, res) => {
           const lonMatch = text.match(/<lng>([^<]+)<\/lng>/);
           const countryMatch = text.match(/<n>([^<]+)<\/name>/);
           if (latMatch && lonMatch) {
-            callsignLookupCache.set(call, {
+            cacheCallsignLookup(call, {
               data: {
                 callsign: call,
                 lat: parseFloat(latMatch[1]),
@@ -3040,6 +3139,39 @@ app.get('/api/dxcluster/paths', async (req, res) => {
 // Cache for callsign lookups - callsigns don't change location often
 const callsignLookupCache = new Map(); // key = callsign, value = { data, timestamp }
 const CALLSIGN_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+const CALLSIGN_CACHE_MAX = 10000; // Hard cap — evict oldest when exceeded
+
+// Periodic cleanup: purge expired entries every 30 minutes
+setInterval(() => {
+  const now = Date.now();
+  let purged = 0;
+  for (const [call, entry] of callsignLookupCache) {
+    if (now - entry.timestamp > CALLSIGN_CACHE_TTL) {
+      callsignLookupCache.delete(call);
+      purged++;
+    }
+  }
+  // If still over cap after TTL purge, evict oldest entries
+  if (callsignLookupCache.size > CALLSIGN_CACHE_MAX) {
+    const sorted = [...callsignLookupCache.entries()].sort((a, b) => a[1].timestamp - b[1].timestamp);
+    const toRemove = sorted.slice(0, callsignLookupCache.size - CALLSIGN_CACHE_MAX);
+    for (const [call] of toRemove) {
+      callsignLookupCache.delete(call);
+      purged++;
+    }
+  }
+  if (purged > 0) logDebug(`[Cache] Callsign lookup: purged ${purged} expired/excess entries, ${callsignLookupCache.size} remaining`);
+}, 30 * 60 * 1000);
+
+// Helper: add to cache with size enforcement — prevents unbounded growth between cleanups
+function cacheCallsignLookup(call, data) {
+  if (callsignLookupCache.size >= CALLSIGN_CACHE_MAX && !callsignLookupCache.has(call)) {
+    // Evict oldest entry to make room
+    const oldest = callsignLookupCache.keys().next().value;
+    if (oldest) callsignLookupCache.delete(oldest);
+  }
+  callsignLookupCache.set(call, data);
+}
 
 // ── Extract base callsign from decorated/portable calls ──
 // Strips prefixes (5Z4/OZ6ABL → OZ6ABL) and suffixes (UA1TAN/M → UA1TAN)
@@ -3102,7 +3234,9 @@ const qrzSession = {
   password: CONFIG._qrzPassword || '',
   loginInFlight: null,  // Dedup concurrent login attempts
   lookupCount: 0,
-  lastError: null
+  lastError: null,
+  authFailedUntil: 0,  // Cooldown after credential failures — don't retry until this timestamp
+  authFailCooldown: 60 * 60 * 1000  // 1 hour cooldown after bad credentials
 };
 
 // Persist QRZ credentials to a file so they survive restarts (set via Settings UI)
@@ -3140,6 +3274,11 @@ function isQRZConfigured() {
 async function qrzLogin() {
   if (!isQRZConfigured()) return null;
   
+  // Don't retry if credentials failed recently — avoids hammering QRZ with bad creds
+  if (Date.now() < qrzSession.authFailedUntil) {
+    return null;
+  }
+  
   // Dedup: if a login is already in-flight, piggyback on it
   if (qrzSession.loginInFlight) return qrzSession.loginInFlight;
   
@@ -3162,7 +3301,13 @@ async function qrzLogin() {
       
       if (errorMatch) {
         qrzSession.lastError = errorMatch[1];
-        console.error(`[QRZ] Login failed: ${errorMatch[1]}`);
+        // Credential failures get a long cooldown — no point retrying until creds change
+        if (errorMatch[1].includes('incorrect') || errorMatch[1].includes('Invalid') || errorMatch[1].includes('denied')) {
+          qrzSession.authFailedUntil = Date.now() + qrzSession.authFailCooldown;
+          console.error(`[QRZ] Login failed: ${errorMatch[1]} — suppressing retries for 1 hour`);
+        } else {
+          console.error(`[QRZ] Login failed: ${errorMatch[1]}`);
+        }
         return null;
       }
       
@@ -3170,6 +3315,7 @@ async function qrzLogin() {
         qrzSession.key = keyMatch[1];
         qrzSession.expiry = Date.now() + qrzSession.maxAge;
         qrzSession.lastError = null;
+        qrzSession.authFailedUntil = 0; // Clear cooldown on success
         const subInfo = subExpMatch ? subExpMatch[1] : 'unknown';
         console.log(`[QRZ] Session established (subscription: ${subInfo})`);
         return qrzSession.key;
@@ -3319,6 +3465,7 @@ app.get('/api/qrz/status', (req, res) => {
     hasSession: !!qrzSession.key,
     lookupCount: qrzSession.lookupCount,
     lastError: qrzSession.lastError,
+    authCooldownRemaining: qrzSession.authFailedUntil > Date.now() ? Math.round((qrzSession.authFailedUntil - Date.now()) / 60000) : 0,
     source: CONFIG._qrzUsername ? 'env' : (qrzSession.username ? 'settings' : 'none')
   });
 });
@@ -3338,6 +3485,7 @@ app.post('/api/qrz/configure', writeLimiter, async (req, res) => {
   qrzSession.password = password.trim();
   qrzSession.key = null;
   qrzSession.expiry = 0;
+  qrzSession.authFailedUntil = 0; // Clear cooldown — user is providing new credentials
   
   const key = await qrzLogin();
   
@@ -3377,6 +3525,7 @@ app.post('/api/qrz/remove', writeLimiter, (req, res) => {
   qrzSession.expiry = 0;
   qrzSession.lookupCount = 0;
   qrzSession.lastError = null;
+  qrzSession.authFailedUntil = 0;
   
   try {
     if (fs.existsSync(QRZ_CREDS_FILE)) {
@@ -3442,7 +3591,7 @@ app.get('/api/callsign/:call', async (req, res) => {
     
     if (result) {
       logDebug(`[Callsign Lookup] ${callsign}: ${result.source} -> ${result.lat?.toFixed(2)}, ${result.lon?.toFixed(2)}`);
-      callsignLookupCache.set(callsign, { data: result, timestamp: now });
+      cacheCallsignLookup(callsign, { data: result, timestamp: now });
       return res.json(result);
     }
     
@@ -3454,7 +3603,7 @@ app.get('/api/callsign/:call', async (req, res) => {
     // Still try prefix estimate on error
     const estimated = estimateLocationFromPrefix(callsign);
     if (estimated) {
-      callsignLookupCache.set(callsign, { data: { ...estimated, source: 'prefix' }, timestamp: now });
+      cacheCallsignLookup(callsign, { data: { ...estimated, source: 'prefix' }, timestamp: now });
       return res.json({ ...estimated, source: 'prefix' });
     }
     res.status(500).json({ error: 'Lookup failed' });
@@ -4166,6 +4315,20 @@ function estimateLocationFromPrefix(callsign) {
     }
   }
   
+  // Fallback: try cty.dat database (has lat/lon for every DXCC entity)
+  const ctyResult = lookupCall(callsign);
+  if (ctyResult && ctyResult.lat != null && ctyResult.lon != null) {
+    return {
+      callsign,
+      lat: ctyResult.lat,
+      lon: ctyResult.lon,
+      grid: null,
+      country: ctyResult.entity || 'Unknown',
+      estimated: true,
+      source: 'prefix'
+    };
+  }
+
   // Fallback to first character (most likely country for each letter)
   const firstCharGrids = {
     'A': 'EM79', 'B': 'PL02', 'C': 'FN03', 'D': 'JO51', 'E': 'IO63', // A=USA (AA-AL), B=China, C=Canada, D=Germany, E=Spain/Ireland
@@ -4858,7 +5021,16 @@ const rbnSpotsByDX = new Map(); // Map<dxCallsign, spot[]>
 const MAX_SPOTS_PER_DX = 50;   // Keep up to 50 spots per DX station
 const MAX_DX_CALLSIGNS = 5000; // Track up to 5000 unique DX stations
 const RBN_SPOT_TTL = 30 * 60 * 1000; // 30 minutes
-const callsignLocationCache = new Map(); // Permanent cache for skimmer locations
+const callsignLocationCache = new Map(); // Cache for skimmer/station locations
+const LOCATION_CACHE_MAX = 2000; // ~1000 active RBN skimmers worldwide, 2x headroom
+
+function cacheCallsignLocation(call, data) {
+  if (callsignLocationCache.size >= LOCATION_CACHE_MAX && !callsignLocationCache.has(call)) {
+    const oldest = callsignLocationCache.keys().next().value;
+    if (oldest) callsignLocationCache.delete(oldest);
+  }
+  callsignLocationCache.set(call, data);
+}
 let rbnSpotCount = 0; // Total spots received (for stats)
 
 // Helper function to convert frequency to band
@@ -5056,7 +5228,7 @@ async function enrichSpotWithLocation(spot) {
         };
         
         // Cache permanently
-        callsignLocationCache.set(skimmerCall, location);
+        cacheCallsignLocation(skimmerCall, location);
         
         return {
           ...spot,
@@ -5152,7 +5324,7 @@ app.get('/api/rbn/location/:callsign', async (req, res) => {
       };
       
       // Cache permanently (skimmers don't move!)
-      callsignLocationCache.set(callsign, result);
+      cacheCallsignLocation(callsign, result);
       
       return res.json(result);
     }
@@ -5490,7 +5662,6 @@ app.get('/api/wspr/heatmap', async (req, res) => {
   }
 });
 
-
 // ============================================
 // SATELLITE TRACKING API
 // ============================================
@@ -5506,8 +5677,8 @@ const HAM_SATELLITES = {
   'PO-101': { norad: 43678, name: 'PO-101 (Diwata-2)', color: '#ff3399', priority: 1, mode: 'FM' },
   
   // Weather Satellites - GOES & METEOR
-  //'GOES-18': { norad: 51850, name: 'GOES-18', color: '#66ff66', priority: 1, mode: 'GRB/HRIT/LRIT' },
-  //'GOES-19': { norad: 60133, name: 'GOES-19', color: '#33cc33', priority: 1, mode: 'GRB/HRIT/LRIT' },
+  'GOES-18': { norad: 51850, name: 'GOES-18', color: '#66ff66', priority: 1, mode: 'GRB/HRIT/LRIT' },
+  'GOES-19': { norad: 60133, name: 'GOES-19', color: '#33cc33', priority: 1, mode: 'GRB/HRIT/LRIT' },
   'METEOR-M2-3': { norad: 57166, name: 'METEOR M2-3', color: '#FF0000', priority: 1, mode: 'HRPT/LRPT' },
   'METEOR-M2-4': { norad: 59051, name: 'METEOR M2-4', color: '#FF0000', priority: 1, mode: 'HRPT/LRPT' },
   'SUOMI-NPP': { norad: 37849, name: 'SUOMI NPP', color: '#0000FF', priority: 2, mode: 'HRD/SMD' },
@@ -5567,20 +5738,19 @@ const HAM_SATELLITES = {
   'SSTV-ISS': { norad: 25544, name: 'ISS SSTV', color: '#00ffff', priority: 2, mode: 'SSTV' }
 };
 
-// Cache for TLE data (refresh every 6 hours)
 let tleCache = { data: null, timestamp: 0 };
 const TLE_CACHE_DURATION = 6 * 60 * 60 * 1000; // 6 hours
-
 app.get('/api/satellites/tle', async (req, res) => {
   try {
     const now = Date.now();
-    // Return cached data if fresh (6-hour window)
+
+    // Return memory cache if fresh (6-hour window)
     if (tleCache.data && (now - tleCache.timestamp) < TLE_CACHE_DURATION) {
       return res.json(tleCache.data);
     }
 
     logDebug('[Satellites] Fetching fresh TLE data from multiple groups...');
-    const tleData = {}; // Declare this exactly once to avoid SyntaxErrors
+    const tleData = {};
     
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -6537,15 +6707,15 @@ function calculateEnhancedReliability(freq, distance, midLat, midLon, hour, sfi,
   const muf = calculateMUF(distance, midLat, midLon, hour, sfi, ssn, hourIonoData);
   const luf = calculateLUF(distance, midLat, hour, sfi, kIndex);
   
-  // Apply signal margin from mode + power
-  // Positive margin (e.g. FT8 or high power) effectively widens the usable window:
-  //   - Extends effective MUF (weak-signal modes can decode signals near/above MUF)
+  // Apply signal margin from mode + power to MUF/LUF boundaries.
+  // Positive margin (e.g. FT8 or high power) widens the usable window:
+  //   - Extends effective MUF (more power/sensitivity can use marginal propagation)
   //   - Reduces effective LUF (more power overcomes D-layer absorption)
-  // Each dB of margin extends MUF by ~1.2% and reduces LUF by ~0.8%
-  const effectiveMuf = muf * (1 + signalMarginDb * 0.012);
-  const effectiveLuf = luf * Math.max(0.1, 1 - signalMarginDb * 0.008);
+  // Scale: ~2% per dB for MUF, ~1.5% per dB for LUF
+  const effectiveMuf = muf * (1 + signalMarginDb * 0.020);
+  const effectiveLuf = luf * Math.max(0.1, 1 - signalMarginDb * 0.015);
   
-  // Calculate reliability based on frequency position relative to effective MUF/LUF
+  // Calculate BASE reliability from frequency position relative to effective MUF/LUF
   let reliability = 0;
   
   if (freq > effectiveMuf * 1.1) {
@@ -6580,6 +6750,32 @@ function calculateEnhancedReliability(freq, distance, midLat, midLon, hour, sfi,
         // Above OWF - reliability decreases as we approach MUF
         reliability = 95 - ((position - optimalPosition) / (1 - optimalPosition)) * 45;
       }
+    }
+  }
+  
+  // ── Power/mode signal margin: direct effect on reliability ──
+  // In real propagation, more power = higher received SNR = better probability
+  // of maintaining a link. A marginal path (30% reliability) at 100W SSB becomes
+  // much more reliable at 1000W, and much worse at 5W.
+  //
+  // signalMarginDb: 0 at SSB/100W, +10 at SSB/1000W, -13 at SSB/5W, +34 at FT8/100W
+  //
+  // Apply as a sigmoid-shaped boost/penalty centered on the baseline reliability.
+  // Positive margin pushes reliability toward 99, negative pushes toward 0.
+  if (signalMarginDb !== 0 && reliability > 0 && reliability < 99) {
+    // Convert dB margin to a reliability shift.
+    // Each 10 dB roughly doubles (or halves) the chance of a usable link.
+    // Use logistic scaling so we don't exceed 0-99 bounds.
+    const marginFactor = signalMarginDb / 15; // normalized: ±1 at ±15dB
+    
+    if (marginFactor > 0) {
+      // Boost: push toward 99. Marginal paths benefit most.
+      const headroom = 99 - reliability;
+      reliability += headroom * (1 - Math.exp(-marginFactor * 1.2));
+    } else {
+      // Penalty: push toward 0. Good paths degrade.
+      const room = reliability;
+      reliability -= room * (1 - Math.exp(marginFactor * 1.2));
     }
   }
   
@@ -8519,7 +8715,7 @@ function handleWSJTXMessage(msg, state) {
               const lonMatch = text.match(/<lng>([^<]+)<\/lng>/);
               const countryMatch = text.match(/<n>([^<]+)<\/name>/);
               if (latMatch && lonMatch) {
-                callsignLookupCache.set(targetCall, {
+                cacheCallsignLookup(targetCall, {
                   data: {
                     callsign: targetCall,
                     lat: parseFloat(latMatch[1]),
@@ -9075,6 +9271,30 @@ app.get('/api/wsjtx/relay/download/:platform', (req, res) => {
 
 // CONTEST LOGGER UDP + API (N1MM / DXLog)
 // ============================================
+
+// ── CTY.DAT — DXCC Entity Database ────────────────────────
+// Serves the parsed cty.dat prefix → entity lookup for client-side callsign identification.
+// Data from country-files.com (AD1C), refreshed every 24h.
+
+app.get('/api/cty', (req, res) => {
+  const data = getCtyData();
+  if (!data) {
+    return res.status(503).json({ error: 'CTY data not yet loaded' });
+  }
+  // Long cache — data only changes every few weeks upstream
+  res.set('Cache-Control', 'public, max-age=3600, s-maxage=3600');
+  res.json(data);
+});
+
+// Lightweight single-call lookup (avoids sending full 200KB+ database to client)
+app.get('/api/cty/lookup/:call', (req, res) => {
+  const result = lookupCall(req.params.call);
+  if (!result) {
+    return res.status(404).json({ error: 'Unknown callsign prefix' });
+  }
+  res.set('Cache-Control', 'public, max-age=3600, s-maxage=3600');
+  res.json(result);
+});
 
 // ── RIG LISTENER DOWNLOAD ─────────────────────────────────
 // Serves the rig-listener.js agent and generates one-click launcher scripts
@@ -9656,6 +9876,14 @@ if (N1MM_ENABLED) {
   console.log('');
 
   startAutoUpdateScheduler();
+  
+  // Load DXCC entity database (cty.dat) — async, non-blocking
+  initCtyData().then(() => {
+    const data = getCtyData();
+    if (data) {
+      console.log(`  📡 CTY database: ${data.entities.length} entities, ${Object.keys(data.prefixes).length} prefixes`);
+    }
+  }).catch(() => {});
   
   // Check for outdated systemd service file that prevents auto-update restart
   if (AUTO_UPDATE_ENABLED && (process.env.INVOCATION_ID || process.ppid === 1)) {

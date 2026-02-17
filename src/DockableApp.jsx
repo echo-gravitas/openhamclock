@@ -28,13 +28,12 @@ import {
   IDTimerPanel
 } from './components';
 
-import { loadLayout, saveLayout } from './store/layoutStore.js';
+import { loadLayout, saveLayout, DEFAULT_LAYOUT } from './store/layoutStore.js';
 import { DockableLayoutProvider } from './contexts';
 import { useRig } from './contexts/RigContext.jsx';
 import './styles/flexlayout-openhamclock.css';
 import useMapLayers from './hooks/app/useMapLayers';
-import useRotator from './hooks/useRotator';
-import useLocalInstall from './hooks/app/useLocalInstall';
+import useRotator from "./hooks/useRotator";
 
 // Icons
 const PlusIcon = () => (
@@ -100,7 +99,6 @@ export const DockableApp = ({
   togglePOTA,
   togglePOTALabels,
   toggleWWFF,
-  toggleWWFFLabels,
   toggleSOTA,
   toggleSatellites,
   togglePSKReporter,
@@ -148,41 +146,11 @@ export const DockableApp = ({
   const togglePOTALabelsEff = useInternalMapLayers ? internalMap.togglePOTALabels : togglePOTALabels;
   const toggleWWFFEff = useInternalMapLayers ? internalMap.toggleWWFF : toggleWWFF;
   const toggleWWFFLabelsEff = useInternalMapLayers ? internalMap.toggleWWFFLabels : toggleWWFFLabels;
+  const toggleSOTAEff = useInternalMapLayers ? internalMap.toggleSOTA : toggleSOTA;
   const toggleSatellitesEff = useInternalMapLayers ? internalMap.toggleSatellites : toggleSatellites;
   const togglePSKReporterEff = useInternalMapLayers ? internalMap.togglePSKReporter : togglePSKReporter;
   const toggleWSJTXEff = useInternalMapLayers ? internalMap.toggleWSJTX : toggleWSJTX;
   const toggleRotatorBearingEff = useInternalMapLayers ? internalMap.toggleRotatorBearing : toggleRotatorBearing;
-
-  // Rotator is a local-only feature and must never break hosted deployments.
-  const isLocalInstallHook = useLocalInstall();
-  const isLocal = (typeof isLocalInstall === 'boolean') ? isLocalInstall : isLocalInstallHook;
-
-  const [rotatorFeatureEnabled, setRotatorFeatureEnabled] = useState(() => {
-    try {
-      return localStorage.getItem('ohc_rotator_enabled') === '1';
-    } catch {
-      return false;
-    }
-  });
-
-  // Allow SettingsPanel (and other UI) to toggle rotator via localStorage.
-  useEffect(() => {
-    const onChange = () => {
-      try {
-        setRotatorFeatureEnabled(localStorage.getItem('ohc_rotator_enabled') === '1');
-      } catch {
-        setRotatorFeatureEnabled(false);
-      }
-    };
-    window.addEventListener('storage', onChange);
-    window.addEventListener('ohc-rotator-config-changed', onChange);
-    return () => {
-      window.removeEventListener('storage', onChange);
-      window.removeEventListener('ohc-rotator-config-changed', onChange);
-    };
-  }, []);
-
-  const rotatorEnabled = isLocal && rotatorFeatureEnabled;
 
   // Per-panel zoom levels (persisted)
   const [panelZoom, setPanelZoom] = useState(() => {
@@ -193,7 +161,7 @@ export const DockableApp = ({
   });
 
   useEffect(() => {
-    try { localStorage.setItem('openhamclock_panelZoom', JSON.stringify(panelZoom)); } catch {}
+    try { localStorage.setItem('openhamclock_panelZoom', JSON.stringify(panelZoom)); } catch { }
   }, [panelZoom]);
 
   const ZOOM_STEPS = [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.5, 1.75, 2.0];
@@ -211,13 +179,6 @@ export const DockableApp = ({
     });
   }, []);
 
-  const resetZoom = useCallback((component) => {
-    setPanelZoom(prev => {
-      const { [component]: _, ...rest } = prev;
-      return rest;
-    });
-  }, []);
-
   // Rig Control Hook
   const { tuneTo, enabled } = useRig();
 
@@ -225,19 +186,42 @@ export const DockableApp = ({
   const handleSpotClick = useCallback((spot) => {
     if (!spot) return;
 
-    if (enabled && (spot.freq || spot.freqMHz)) {
-      tuneTo(spot.freq || spot.freqMHz, spot.mode);
+    // 1. Tune Rig if frequency is available and rig control is enabled
+    if (enabled && (spot.freq || spot.freqMHz || spot.dialFrequency)) {
+      let freqToSend;
+
+      // WSJT-X decodes have dialFrequency (the VFO frequency to tune to)
+      // The freq field is just the audio delta offset within the passband
+      if (spot.dialFrequency) {
+        freqToSend = spot.dialFrequency; // Use dial frequency directly
+      } else {
+        // For other spot types (DX Cluster, POTA, etc.), use freq or freqMHz as-is
+        freqToSend = spot.freq || spot.freqMHz;
+      }
+
+      tuneTo(freqToSend, spot.mode);
     }
 
+    // 2. Set DX Location if location data is available
+    // For DX Cluster spots, we need to find the path data which contains coordinates
+    // For POTA/SOTA, the spot object itself has lat/lon
     if (spot.lat && spot.lon) {
       handleDXChange({ lat: spot.lat, lon: spot.lon });
     } else if (spot.call) {
+      // Try to find in DX Cluster paths
       const path = (dxClusterData.paths || []).find(p => p.dxCall === spot.call);
       if (path && path.dxLat != null && path.dxLon != null) {
         handleDXChange({ lat: path.dxLat, lon: path.dxLon });
       }
     }
   }, [tuneTo, enabled, handleDXChange, dxClusterData.paths]);
+
+  const resetZoom = useCallback((component) => {
+    setPanelZoom(prev => {
+      const { [component]: _, ...rest } = prev;
+      return rest;
+    });
+  }, []);
 
   // Handle model changes with debounced save
   const handleModelChange = useCallback((newModel) => {
@@ -256,6 +240,7 @@ export const DockableApp = ({
 
   // Panel definitions
   const panelDefs = useMemo(() => {
+    // Only show Ambient Weather when credentials are configured
     const hasAmbient = (() => {
       try {
         return !!(import.meta.env?.VITE_AMBIENT_API_KEY && import.meta.env?.VITE_AMBIENT_APPLICATION_KEY);
@@ -283,17 +268,14 @@ export const DockableApp = ({
       'pota': { name: 'POTA', icon: '🏕️' },
       'wwff': { name: 'WWFF', icon: '🌲' },
       'sota': { name: 'SOTA', icon: '⛰️' },
-
-      // Rotator is local-only (feature-gated inside panel via rotatorEnabled)
-      ...(isLocal ? { 'rotator': { name: 'Rotator', icon: '🧭' } } : {}),
-
+      ...(isLocalInstall ? { 'rotator': { name: 'Rotator', icon: '🧭' } } : {}),
       'contests': { name: 'Contests', icon: '🏆' },
       ...(hasAmbient ? { 'ambient': { name: 'Ambient Weather', icon: '🌦️' } } : {}),
       'rig-control': { name: 'Rig Control', icon: '📻' },
       'on-air': { name: 'On Air', icon: '🔴' },
       'id-timer': { name: 'ID Timer', icon: '📢' },
     };
-  }, [isLocal]);
+  }, [isLocalInstall]);
 
   // Add panel
   const handleAddPanel = useCallback((panelId) => {
@@ -323,7 +305,7 @@ export const DockableApp = ({
       <WeatherPanel
         weatherData={localWeather}
         tempUnit={tempUnit}
-        onTempUnitChange={(unit) => { setTempUnit(unit); try { localStorage.setItem('openhamclock_tempUnit', unit); } catch {} }}
+        onTempUnitChange={(unit) => { setTempUnit(unit); try { localStorage.setItem('openhamclock_tempUnit', unit); } catch { } }}
         nodeId={nodeId}
       />
     </div>
@@ -370,7 +352,7 @@ export const DockableApp = ({
         <WeatherPanel
           weatherData={dxWeather}
           tempUnit={tempUnit}
-          onTempUnitChange={(unit) => { setTempUnit(unit); try { localStorage.setItem('openhamclock_tempUnit', unit); } catch {} }}
+          onTempUnitChange={(unit) => { setTempUnit(unit); try { localStorage.setItem('openhamclock_tempUnit', unit); } catch { } }}
           nodeId={nodeId}
         />
       )}
@@ -378,18 +360,15 @@ export const DockableApp = ({
   );
 
   const rot = useRotator({
-    enabled: rotatorEnabled,
     mock: false,
-    endpointUrl: isLocal ? '/api/rotator/status' : undefined,
-    pollMs: 1000,
+    endpointUrl: isLocalInstall ? "/api/rotator/status" : undefined,
+    pollMs: 2000,
     staleMs: 5000,
   });
-
   const turnRotator = useCallback(async (azimuth) => {
-    if (!rotatorEnabled) return { ok: false, error: 'rotator disabled' };
-    const res = await fetch('/api/rotator/turn', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    const res = await fetch("/api/rotator/turn", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ azimuth }),
     });
     const data = await res.json().catch(() => ({}));
@@ -397,17 +376,16 @@ export const DockableApp = ({
       throw new Error(data?.error || `HTTP ${res.status}`);
     }
     return data;
-  }, [rotatorEnabled]);
+  }, []);
 
   const stopRotator = useCallback(async () => {
-    if (!rotatorEnabled || !isLocal) return { ok: false, error: 'rotator disabled' };
-    const res = await fetch('/api/rotator/stop', { method: 'POST' });
+    const res = await fetch("/api/rotator/stop", { method: "POST" });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data?.ok === false) {
       throw new Error(data?.error || `HTTP ${res.status}`);
     }
     return data;
-  }, [rotatorEnabled, isLocal]);
+  }, []);
 
   // Render World Map
   const renderWorldMap = () => (
@@ -447,13 +425,13 @@ export const DockableApp = ({
         showWSJTX={mapLayersEff.showWSJTX}
         showDXNews={mapLayersEff.showDXNews}
 
-        // Rotator bearing overlay support
-        showRotatorBearing={rotatorEnabled ? mapLayersEff.showRotatorBearing : false}
-        rotatorAzimuth={rotatorEnabled ? rot.azimuth : null}
-        rotatorLastGoodAzimuth={rotatorEnabled ? rot.lastGoodAzimuth : null}
-        rotatorIsStale={rotatorEnabled ? rot.isStale : true}
-        rotatorControlEnabled={rotatorEnabled ? !rot.isStale : false}
-        onRotatorTurnRequest={rotatorEnabled ? turnRotator : undefined}
+        // ✅ Rotator bearing overlay support
+        showRotatorBearing={mapLayersEff.showRotatorBearing}
+        rotatorAzimuth={rot.azimuth}
+        rotatorLastGoodAzimuth={rot.lastGoodAzimuth}
+        rotatorIsStale={rot.isStale}
+        rotatorControlEnabled={!rot.isStale}
+        onRotatorTurnRequest={turnRotator}
 
         hoveredSpot={hoveredSpot}
         leftSidebarVisible={true}
@@ -467,6 +445,7 @@ export const DockableApp = ({
     </div>
   );
 
+
   // Factory for rendering panel content
   const factory = useCallback((node) => {
     const component = node.getComponent();
@@ -475,7 +454,7 @@ export const DockableApp = ({
     let content;
     switch (component) {
       case 'world-map':
-        return renderWorldMap();
+        return renderWorldMap(); // Map has its own zoom — skip panel zoom
 
       case 'de-location':
         content = renderDELocation(nodeId);
@@ -588,8 +567,10 @@ export const DockableApp = ({
             loading={potaSpots.loading}
             showOnMap={mapLayersEff.showPOTA}
             onToggleMap={togglePOTAEff}
+
             showLabelsOnMap={mapLayersEff.showPOTALabels}
             onToggleLabelsOnMap={togglePOTALabelsEff}
+            onSpotClick={handleSpotClick}
           />
         );
         break;
@@ -601,45 +582,35 @@ export const DockableApp = ({
             loading={wwffSpots.loading}
             showOnMap={mapLayersEff.showWWFF}
             onToggleMap={toggleWWFFEff}
+
             showLabelsOnMap={mapLayersEff.showWWFFLabels}
             onToggleLabelsOnMap={toggleWWFFLabelsEff}
+            onSpotClick={handleSpotClick}
           />
         );
         break;
 
       case 'sota':
-        content = <SOTAPanel data={sotaSpots.data} loading={sotaSpots.loading} showOnMap={mapLayersEff.showSOTA} onToggleMap={toggleSOTA} onSpotClick={handleSpotClick} />;
+        content = <SOTAPanel data={sotaSpots.data} loading={sotaSpots.loading} showOnMap={mapLayersEff.showSOTA} onToggleMap={toggleSOTAEff} />;
         break;
 
       case 'contests':
         content = <ContestPanel data={contests.data} loading={contests.loading} />;
         break;
 
-      case 'rotator': {
-        if (!rotatorEnabled) {
-          return (
-            <div style={{ padding: 14, height: '100%', overflow: 'auto' }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--accent-amber)', marginBottom: 8 }}>
-                🧭 Rotator (Local Only)
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                Rotator support is disabled (or you are on the hosted site). Enable it in Settings → Integrations when running OpenHamClock locally.
-              </div>
-            </div>
-          );
-        }
-
+      case "rotator":
         return (
           <RotatorPanel
             state={rot}
             overlayEnabled={mapLayersEff.showRotatorBearing}
             onToggleOverlay={toggleRotatorBearingEff}
+
             onTurnAzimuth={turnRotator}
             onStop={stopRotator}
             controlsEnabled={!rot.isStale}
           />
         );
-      }
+
 
       case 'ambient':
         content = (
@@ -647,7 +618,7 @@ export const DockableApp = ({
             tempUnit={tempUnit}
             onTempUnitChange={(unit) => {
               setTempUnit(unit);
-              try { localStorage.setItem('openhamclock_tempUnit', unit); } catch {}
+              try { localStorage.setItem('openhamclock_tempUnit', unit); } catch { }
             }}
           />
         );
@@ -685,66 +656,21 @@ export const DockableApp = ({
     }
     return content;
   }, [
-    config,
-    currentTime,
-    deGrid,
-    dxGrid,
-    dxLocation,
-    deSunTimes,
-    dxSunTimes,
-    showDxWeather,
-    tempUnit,
-    localWeather,
-    dxWeather,
-    solarIndices,
-    propagation,
-    bandConditions,
-    dxClusterData,
-    dxFilters,
-    hoveredSpot,
-    mapLayersEff,
-    potaSpots,
-    wwffSpots,
-    sotaSpots,
-    mySpots,
-    satellites,
-    filteredSatellites,
-    filteredPskSpots,
-    wsjtxMapSpots,
-    dxpeditions,
-    contests,
-    pskFilters,
-    wsjtx,
-    handleDXChange,
-    setDxFilters,
-    setShowDXFilters,
-    setShowPSKFilters,
-    setHoveredSpot,
-    toggleDXPathsEff,
-    toggleDXLabelsEff,
-    togglePOTAEff,
-    togglePOTALabelsEff,
-    toggleWWFFEff,
-    toggleWWFFLabelsEff,
-    toggleSOTA,
-    toggleSatellitesEff,
-    togglePSKReporterEff,
-    toggleWSJTXEff,
-    dxLocked,
-    handleToggleDxLock,
-    panelZoom,
-    rotatorEnabled,
-    rot,
-    toggleRotatorBearingEff,
-    turnRotator,
-    stopRotator
+    config, deGrid, dxGrid, dxLocation, deSunTimes, dxSunTimes, showDxWeather, tempUnit, localWeather, dxWeather, solarIndices,
+    propagation, bandConditions, dxClusterData, dxFilters, hoveredSpot, mapLayers, potaSpots, wwffSpots, sotaSpots,
+    mySpots, satellites, filteredSatellites, filteredPskSpots, wsjtxMapSpots, dxpeditions, contests,
+    pskFilters, wsjtx, handleDXChange, setDxFilters, setShowDXFilters, setShowPSKFilters,
+    setHoveredSpot, toggleDXPaths, toggleDXLabels, togglePOTA, toggleWWFF, toggleSOTA, toggleSatellites, togglePSKReporter, toggleWSJTX,
+    dxLocked, handleToggleDxLock, panelZoom
   ]);
 
   // Add + and font size buttons to tabsets
   const onRenderTabSet = useCallback((node, renderValues) => {
+    // Get the active tab's component name for zoom controls
     const selectedNode = node.getSelectedNode?.();
     const selectedComponent = selectedNode?.getComponent?.();
 
+    // Skip zoom controls for world-map
     if (selectedComponent && selectedComponent !== 'world-map') {
       const currentZoom = panelZoom[selectedComponent] || 1.0;
       const zoomPct = Math.round(currentZoom * 100);
@@ -760,7 +686,6 @@ export const DockableApp = ({
           A−
         </button>
       );
-
       if (currentZoom !== 1.0) {
         renderValues.stickyButtons.push(
           <button
@@ -774,7 +699,6 @@ export const DockableApp = ({
           </button>
         );
       }
-
       renderValues.stickyButtons.push(
         <button
           key="zoom-in"
@@ -926,6 +850,5 @@ export const DockableApp = ({
       )}
     </div>
   );
-};
-
+}
 export default DockableApp;

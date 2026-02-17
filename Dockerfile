@@ -34,6 +34,7 @@ FROM node:20-alpine AS production
 # Set environment
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV NODE_OPTIONS="--max-old-space-size=2048 --expose-gc"
 
 WORKDIR /app
 
@@ -47,6 +48,7 @@ RUN npm install --omit=dev
 # Copy server files
 COPY server.js ./
 COPY config.js ./
+COPY src/server ./src/server
 
 # Copy WSJT-X relay agent (served as download to users)
 COPY wsjtx-relay ./wsjtx-relay
@@ -72,5 +74,5 @@ EXPOSE 2237/udp
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
 
-# Start server with explicit heap limit (fail fast rather than slow OOM at 4GB)
-CMD ["node", "--max-old-space-size=1024", "server.js"]
+# Start server with explicit heap limit and GC access for periodic compaction
+CMD ["node", "--max-old-space-size=2048", "--expose-gc", "server.js"]
