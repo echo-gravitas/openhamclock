@@ -3,7 +3,93 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OpenHamClock - Amateur Radio Dashboard</title>
+  <title>OpenHamClock - Amateur Radio Dashboard | Live DX Cluster, Propagation, Band Conditions</title>
+  
+  <!-- SEO Meta -->
+  <meta name="description" content="OpenHamClock is a free, real-time amateur radio dashboard with live DX cluster spots, PSK Reporter, Reverse Beacon Network, POTA/SOTA tracking, propagation predictions, solar indices, band conditions, satellite passes, and an interactive world map. Runs on any browser — desktop, Raspberry Pi, tablet, or phone. No login, no ads, no subscription.">
+  <meta name="keywords" content="ham clock, hamclock, openhamclock, open ham clock, amateur radio dashboard, ham radio dashboard, DX cluster, DX spots, PSK Reporter, Reverse Beacon Network, RBN, POTA tracker, SOTA tracker, propagation prediction, band conditions, solar flux, K-index, sunspot number, space weather, ham radio map, great circle map, satellite tracker, amateur radio, ham radio, shortwave, HF propagation, MUF map, gray line, greyline, VOACAP, ham radio tools, free ham radio software, web ham clock, raspberry pi ham clock">
+  <meta name="author" content="Chris Hetherington, K0CJH">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://openhamclock.com/">
+
+  <!-- Open Graph (Facebook, Discord, iMessage, etc.) -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://openhamclock.com/">
+  <meta property="og:title" content="OpenHamClock - Free Amateur Radio Dashboard">
+  <meta property="og:description" content="Live DX cluster spots, PSK Reporter, RBN skimmer data, POTA/SOTA tracking, propagation predictions, solar indices, band conditions, satellite passes, and an interactive world map — all in one free browser-based dashboard. No login, no ads.">
+  <meta property="og:image" content="https://openhamclock.com/icons/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:site_name" content="OpenHamClock">
+  <meta property="og:locale" content="en_US">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="OpenHamClock - Free Amateur Radio Dashboard">
+  <meta name="twitter:description" content="Live DX spots, PSK Reporter, RBN, POTA/SOTA, propagation, solar data, satellites, and world map — free for every ham. No login, no ads.">
+  <meta name="twitter:image" content="https://openhamclock.com/icons/og-image.png">
+
+  <!-- Favicons -->
+  <link rel="icon" type="image/png" sizes="512x512" href="/icons/icon-512.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192.png">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0a0e14">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="OpenHamClock">
+
+  <!-- JSON-LD Structured Data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "OpenHamClock",
+    "alternateName": ["Ham Clock", "HamClock", "Open Ham Clock", "Open HamClock"],
+    "url": "https://openhamclock.com",
+    "description": "Free, real-time amateur radio operations dashboard with live DX cluster spots, PSK Reporter decodes, Reverse Beacon Network data, POTA/SOTA activator tracking, satellite passes, propagation predictions, solar indices, band conditions, space weather, and an interactive world map with great circle paths.",
+    "applicationCategory": "UtilitiesApplication",
+    "operatingSystem": "Any (Web Browser)",
+    "browserRequirements": "Requires a modern web browser",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "author": {
+      "@type": "Person",
+      "name": "Chris Hetherington",
+      "callSign": "K0CJH"
+    },
+    "sameAs": [
+      "https://github.com/accius/openhamclock",
+      "https://www.facebook.com/groups/1217043013897440",
+      "https://www.reddit.com/r/OpenHamClock/"
+    ],
+    "isAccessibleForFree": true,
+    "keywords": "ham clock, amateur radio dashboard, DX cluster, PSK Reporter, propagation, band conditions, POTA, SOTA, ham radio map",
+    "screenshot": "https://openhamclock.com/icons/og-image.png",
+    "softwareHelp": {
+      "@type": "WebPage",
+      "url": "https://openhamclock.com"
+    },
+    "featureList": [
+      "Live DX Cluster spots with filtering",
+      "PSK Reporter real-time decodes via MQTT",
+      "Reverse Beacon Network skimmer data",
+      "POTA and SOTA activator tracking",
+      "HF propagation predictions (VOACAP and ITU-R P.533)",
+      "Solar flux, K-index, sunspot number, and space weather",
+      "MUF and foF2 ionospheric maps",
+      "Interactive world map with great circle paths",
+      "Day/night terminator and gray line",
+      "Satellite pass predictions with TLE data",
+      "WSJT-X integration for FT8/FT4",
+      "Works on desktop, Raspberry Pi, tablet, and phone"
+    ]
+  }
+  </script>
   
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -335,6 +421,47 @@
   </style>
 </head>
 <body>
+  <!-- SEO: Visible content for search engines and no-JS browsers.
+       The entire UI is React/JS-rendered, so crawlers need this for indexing. -->
+  <noscript>
+    <div style="max-width:800px;margin:40px auto;padding:20px;font-family:Arial,sans-serif;color:#333;line-height:1.6">
+      <h1>OpenHamClock — Free Amateur Radio Dashboard</h1>
+      <p><strong>OpenHamClock</strong> is the original free, open-source, web-based ham clock and amateur radio operations dashboard created by Chris Hetherington, K0CJH. Visit <a href="https://openhamclock.com">openhamclock.com</a> with JavaScript enabled for the full real-time experience.</p>
+
+      <h2>Live Ham Radio Data in One Dashboard</h2>
+      <p>OpenHamClock provides amateur radio operators with everything they need in a single browser window:</p>
+      <ul>
+        <li><strong>DX Cluster Spots</strong> — Live DX spots from DX Spider, HamQTH, and proxy feeds with band and mode filtering</li>
+        <li><strong>PSK Reporter</strong> — Real-time FT8, FT4, CW, and digital mode decodes via MQTT streaming</li>
+        <li><strong>Reverse Beacon Network (RBN)</strong> — CW and RTTY skimmer spots from worldwide receivers</li>
+        <li><strong>POTA Tracker</strong> — Parks on the Air activator spots with park details and frequencies</li>
+        <li><strong>SOTA Tracker</strong> — Summits on the Air activator tracking</li>
+        <li><strong>WWFF Tracker</strong> — World Wide Flora and Fauna activator spots</li>
+        <li><strong>Propagation Predictions</strong> — HF propagation via VOACAP and ITU-R P.533-14 models</li>
+        <li><strong>Band Conditions</strong> — Real-time HF band condition assessment</li>
+        <li><strong>Solar Indices</strong> — Solar flux index (SFI), sunspot number (SSN), K-index, and A-index</li>
+        <li><strong>Space Weather</strong> — NOAA X-ray flux, aurora activity, geomagnetic storm alerts</li>
+        <li><strong>MUF and foF2 Maps</strong> — Ionospheric maximum usable frequency and critical frequency layers</li>
+        <li><strong>WSPR Heatmap</strong> — Global WSPR propagation visualization</li>
+        <li><strong>Interactive World Map</strong> — Great circle paths, Maidenhead grid squares, day/night terminator, gray line</li>
+        <li><strong>Satellite Passes</strong> — Amateur radio satellite tracking with TLE orbital data</li>
+        <li><strong>DXpedition Tracker</strong> — Active and upcoming DXpeditions worldwide</li>
+        <li><strong>Contest Calendar</strong> — Upcoming amateur radio contests</li>
+        <li><strong>WSJT-X Integration</strong> — Live FT8/FT4 decode display from WSJT-X</li>
+        <li><strong>Rig Control</strong> — Frequency and mode display from connected transceivers</li>
+        <li><strong>QRZ/HamQTH Callsign Lookup</strong> — Instant operator information</li>
+      </ul>
+
+      <h2>Works Everywhere</h2>
+      <p>OpenHamClock runs on any device with a modern web browser — Windows, Mac, Linux, Raspberry Pi, tablets, and phones. No installation required, no account needed, no subscription, and no ads. Just open <a href="https://openhamclock.com">openhamclock.com</a> and start operating.</p>
+
+      <h2>The Original Ham Clock Web App</h2>
+      <p>OpenHamClock is the original web-based ham clock dashboard, developed and maintained by K0CJH. It serves over 9,000 daily active users from more than 130 countries, with 1,800 to 2,300 concurrent operators at peak times. The project has been featured on numerous amateur radio YouTube channels and is trusted by operators worldwide as their primary operating dashboard.</p>
+
+      <p>OpenHamClock is proudly developed by <strong>CJH Lighting</strong> and the amateur radio community. For the full interactive experience, please enable JavaScript and visit <a href="https://openhamclock.com">openhamclock.com</a>.</p>
+    </div>
+  </noscript>
+
   <div id="root"></div>
 
   <script type="text/babel">
@@ -4987,6 +5114,56 @@
                 {dxClusterSource === 'hamqth' && '→ HamQTH.com CSV feed (works on all platforms)'}
                 {dxClusterSource === 'dxspider' && '→ Direct telnet to dxspider.co.uk:7300 (local/Pi only)'}
               </p>
+            </div>
+
+            {/* Community & Social */}
+            <div style={{ 
+              marginBottom: '24px', padding: '16px', 
+              background: 'var(--bg-tertiary)', borderRadius: '8px',
+              border: '1px solid var(--border-color)'
+            }}>
+              <label style={{ ...labelStyle, marginBottom: '12px', fontSize: '13px' }}>Community</label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <a href="https://github.com/accius/openhamclock" target="_blank" rel="noopener noreferrer" style={{
+                  display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px',
+                  background: 'var(--bg-secondary)', borderRadius: '6px', textDecoration: 'none',
+                  color: 'var(--text-primary)', fontSize: '14px', fontFamily: 'Space Grotesk, sans-serif',
+                  border: '1px solid transparent', transition: 'border-color 0.2s'
+                }} onMouseOver={e => e.currentTarget.style.borderColor = 'var(--border-color)'}
+                   onMouseOut={e => e.currentTarget.style.borderColor = 'transparent'}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>GitHub</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Source code, issues & releases</div>
+                  </div>
+                </a>
+                <a href="https://www.facebook.com/groups/1217043013897440" target="_blank" rel="noopener noreferrer" style={{
+                  display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px',
+                  background: 'var(--bg-secondary)', borderRadius: '6px', textDecoration: 'none',
+                  color: 'var(--text-primary)', fontSize: '14px', fontFamily: 'Space Grotesk, sans-serif',
+                  border: '1px solid transparent', transition: 'border-color 0.2s'
+                }} onMouseOver={e => e.currentTarget.style.borderColor = 'var(--border-color)'}
+                   onMouseOut={e => e.currentTarget.style.borderColor = 'transparent'}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="#1877F2"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>Facebook Group</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Community discussion & help</div>
+                  </div>
+                </a>
+                <a href="https://www.reddit.com/r/OpenHamClock/" target="_blank" rel="noopener noreferrer" style={{
+                  display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px',
+                  background: 'var(--bg-secondary)', borderRadius: '6px', textDecoration: 'none',
+                  color: 'var(--text-primary)', fontSize: '14px', fontFamily: 'Space Grotesk, sans-serif',
+                  border: '1px solid transparent', transition: 'border-color 0.2s'
+                }} onMouseOver={e => e.currentTarget.style.borderColor = 'var(--border-color)'}
+                   onMouseOut={e => e.currentTarget.style.borderColor = 'transparent'}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="#FF4500"><path d="M12 0A12 12 0 000 12a12 12 0 0012 12 12 12 0 0012-12A12 12 0 0012 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 01-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.488.308-.309.73-.491 1.207-.491.968 0 1.754.786 1.754 1.754 0 .716-.435 1.333-1.01 1.614a3.111 3.111 0 01.042.52c0 2.694-3.13 4.87-7.004 4.87-3.874 0-7.004-2.176-7.004-4.87 0-.183.015-.366.043-.534A1.748 1.748 0 014.028 12c0-.968.786-1.754 1.754-1.754.463 0 .898.196 1.207.49 1.207-.883 2.878-1.43 4.744-1.487l.885-4.182a.342.342 0 01.14-.197.35.35 0 01.238-.042l2.906.617a1.214 1.214 0 011.108-.701zM9.25 12C8.561 12 8 12.562 8 13.25c0 .687.561 1.248 1.25 1.248.687 0 1.248-.561 1.248-1.249 0-.688-.561-1.249-1.249-1.249zm5.5 0c-.687 0-1.248.561-1.248 1.25 0 .687.561 1.248 1.249 1.248.688 0 1.249-.561 1.249-1.249 0-.687-.562-1.249-1.25-1.249zm-5.466 3.99a.327.327 0 00-.231.094.33.33 0 000 .463c.842.842 2.484.913 2.961.913.477 0 2.105-.056 2.961-.913a.361.361 0 000-.463.327.327 0 00-.462 0c-.545.533-1.684.73-2.512.73-.828 0-1.979-.196-2.512-.73a.326.326 0 00-.205-.094z"/></svg>
+                  <div>
+                    <div style={{ fontWeight: 600 }}>Reddit</div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>r/OpenHamClock</div>
+                  </div>
+                </a>
+              </div>
             </div>
 
             {/* Buttons */}
