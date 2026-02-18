@@ -5,11 +5,25 @@
 import React from 'react';
 import CallsignLink from './CallsignLink.jsx';
 
-export const SOTAPanel = ({ data, loading, lastUpdated, lastChecked, showOnMap, onToggleMap, onSpotClick }) => {
+export const SOTAPanel = ({ data,
+  loading,
+  lastUpdated,
+  lastChecked,
+  showOnMap,
+  onToggleMap,
+  showLabelsOnMap,
+  onToggleLabelsOnMap = true,
+  onSpotClick
+}) => {
   const staleMinutes = lastUpdated ? Math.floor((Date.now() - lastUpdated) / 60000) : null;
   const isStale = staleMinutes !== null && staleMinutes >= 5;
   const checkedTime = lastChecked ? new Date(lastChecked).toISOString().substr(11, 5) + 'z' : '';
 
+  if (typeof onToggleLabelsOnMap === 'function') {
+    console.log('[SOTA] onToggleLabelsOnMap is a function');
+  } else {
+    console.log('[SOTA] onToggleLabelsOnMap is not a function');
+  }
   return (
     <div className="panel" style={{ padding: '8px', height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div className="panel-header" style={{
@@ -23,22 +37,43 @@ export const SOTAPanel = ({ data, loading, lastUpdated, lastChecked, showOnMap, 
           ⛰ SOTA ACTIVATORS {data?.length > 0 ? `(${data.length})` : ''}
           {checkedTime && <span style={{ color: isStale ? (staleMinutes >= 10 ? '#ff4444' : '#ffaa00') : '#666', marginLeft: '6px', fontSize: '9px' }}>{isStale ? `⚠ ${staleMinutes}m stale` : `✓${checkedTime}`}</span>}
         </span>
-        <button
-          onClick={onToggleMap}
-          title={showOnMap ? 'Hide SOTA activators on map' : 'Show SOTA activators on map'}
-          style={{
-            background: showOnMap ? 'rgba(255, 150, 50, 0.3)' : 'rgba(100, 100, 100, 0.3)',
-            border: `1px solid ${showOnMap ? '#ff9632' : '#666'}`,
-            color: showOnMap ? '#ff9632' : '#888',
-            padding: '1px 6px',
-            borderRadius: '3px',
-            fontSize: '9px',
-            fontFamily: 'JetBrains Mono',
-            cursor: 'pointer'
-          }}
-        >
-          ⊞ Map {showOnMap ? 'ON' : 'OFF'}
-        </button>
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+          <button
+            onClick={onToggleMap}
+            title={showOnMap ? 'Hide SOTA activators on map' : 'Show SOTA activators on map'}
+            style={{
+              background: showOnMap ? 'rgba(255, 150, 50, 0.3)' : 'rgba(100, 100, 100, 0.3)',
+              border: `1px solid ${showOnMap ? '#ff9632' : '#666'}`,
+              color: showOnMap ? '#ff9632' : '#888',
+              padding: '1px 6px',
+              borderRadius: '3px',
+              fontSize: '9px',
+              fontFamily: 'JetBrains Mono',
+              cursor: 'pointer'
+            }}
+          >
+            ⊞ Map {showOnMap ? 'ON' : 'OFF'}
+          </button>
+
+          {typeof onToggleLabelsOnMap === 'function' && (
+            <button
+              onClick={onToggleLabelsOnMap}
+              title={showLabelsOnMap ? 'Hide SOTA callsigns on map' : 'Show SOTA callsigns on map'}
+              style={{
+                background: showLabelsOnMap ? 'rgba(255, 170, 0, 0.22)' : 'rgba(100, 100, 100, 0.3)',
+                border: `1px solid ${showLabelsOnMap ? '#ffaa00' : '#666'}`,
+                color: showLabelsOnMap ? '#ffaa00' : '#888',
+                padding: '1px 6px',
+                borderRadius: '3px',
+                fontSize: '9px',
+                fontFamily: 'JetBrains Mono',
+                cursor: 'pointer'
+              }}
+            >
+              ⊞ Calls {showLabelsOnMap ? 'ON' : 'OFF'}
+            </button>
+          )}
+        </div>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -54,7 +89,7 @@ export const SOTAPanel = ({ data, loading, lastUpdated, lastChecked, showOnMap, 
                 onClick={() => onSpotClick?.(spot)}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '62px 50px 58px 1fr',
+                  gridTemplateColumns: '62px 62px 58px 1fr',
                   gap: '4px',
                   padding: '3px 0',
                   borderBottom: i < data.length - 1 ? '1px solid var(--border-color)' : 'none',

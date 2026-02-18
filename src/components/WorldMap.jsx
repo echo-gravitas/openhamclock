@@ -64,6 +64,7 @@ export const WorldMap = ({
   showWWFF,
   showWWFFLabels = true,
   showSOTA,
+  showSOTALabels = true,
   showPSKReporter,
   showWSJTX,
   onSpotClick,
@@ -1206,7 +1207,7 @@ export const WorldMap = ({
           });
 
           // Only show callsign label when labels are enabled — replicate
-          if (showDXLabels) {
+          if (showSOTALabels) {
             const labelIcon = L.divIcon({
               className: "",
               html: `<span style="display:inline-block;background:#ff9632;color:#000;padding:2px 5px;border-radius:3px;font-size:11px;font-family:'JetBrains Mono',monospace;font-weight:700;white-space:nowrap;border:1px solid rgba(0,0,0,0.5);box-shadow:0 1px 2px rgba(0,0,0,0.3);line-height:1.1;">${spot.call}</span>`,
@@ -1224,7 +1225,7 @@ export const WorldMap = ({
         }
       });
     }
-  }, [sotaSpots, showSOTA, showDXLabels]);
+  }, [sotaSpots, showSOTA, showSOTALabels]);
 
   // Plugin layer system - properly load saved states
   useEffect(() => {
