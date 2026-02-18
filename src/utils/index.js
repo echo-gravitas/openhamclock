@@ -46,3 +46,17 @@ export {
   getCallsignInfo
 } from './callsign.js';
 export {filterDXPaths} from "./dxClusterFilters";
+
+// Band color utilities
+export {
+  BAND_COLOR_STORAGE_KEY,
+  BAND_COLORS_CHANGE_EVENT,
+  BAND_LEGEND_ORDER,
+  DEFAULT_BAND_COLORS,
+  loadBandColorOverrides,
+  saveBandColorOverrides,
+  getEffectiveBandColors,
+  getBandColorForBand,
+  getBandColorForFreq,
+  getBandTextColor
+} from './bandColors.js';

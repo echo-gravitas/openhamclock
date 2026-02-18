@@ -212,5 +212,8 @@
   "dxClusterPanel.mapToggleOff": "OFF",
   "dxClusterPanel.quickSearch": "クイック検索...",
   "dxClusterPanel.noSpotsFiltered": "条件に一致するスポットはありません",
+  "dxClusterPanel.noSpots": "スポットがありません",
+  "app.legend.sun": "Sun",
+  "app.legend.moon": "Moon",
   "dxClusterPanel.noSpots": "スポットがありません"
 }

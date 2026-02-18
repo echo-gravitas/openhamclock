@@ -365,5 +365,8 @@
   "propagation.source.general": "General conditions for all paths",
   "propagation.estimated": "estimated",
   "propagation.heatmap.tooltip.voacap": "Switch to VOACAP heatmap colors (red=good)",
+  "propagation.heatmap.tooltip.stoplight": "Switch to stoplight colors (green=good)",
+  "app.legend.sun": "Sun",
+  "app.legend.moon": "Moon",
   "propagation.heatmap.tooltip.stoplight": "Switch to stoplight colors (green=good)"
 }

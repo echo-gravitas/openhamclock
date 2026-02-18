@@ -222,5 +222,8 @@
   "station.settings.satellites.showAll": "Prikazani vsi sateliti (brez filtra)",
   "station.settings.satellites.selectedCount": "Izbranih satelitov: {{count}}",
   "station.settings.satellites.visible": "✔ Vidno",
+  "station.settings.satellites.belowHorizon": "✔ Pod obzorjem",
+  "app.legend.sun": "Sun",
+  "app.legend.moon": "Moon",
   "station.settings.satellites.belowHorizon": "✔ Pod obzorjem"
 }

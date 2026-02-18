@@ -64,10 +64,19 @@ const App = () => {
   const [showDXFilters, setShowDXFilters] = useState(false);
   const [showPSKFilters, setShowPSKFilters] = useState(false);
   const [layoutResetKey, setLayoutResetKey] = useState(0);
+  const [, setBandColorChangeVersion] = useState(0);
   const [tempUnit, setTempUnit] = useState(() => {
     try { return localStorage.getItem('openhamclock_tempUnit') || 'F'; } catch { return 'F'; }
   });
   const [updateInProgress, setUpdateInProgress] = useState(false);
+
+  useEffect(() => {
+    const onBandColorsChange = () => {
+      setBandColorChangeVersion(v => v + 1);
+    };
+    window.addEventListener('openhamclock-band-colors-change', onBandColorsChange);
+    return () => window.removeEventListener('openhamclock-band-colors-change', onBandColorsChange);
+  }, []);
 
   useEffect(() => {
     if (!configLoaded) return;

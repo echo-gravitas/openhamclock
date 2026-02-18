@@ -23,6 +23,7 @@ const SNAPSHOT_KEYS = [
   'openhamclock_pskActiveTab',
   'openhamclock_pskFilters',
   'openhamclock_pskPanelMode',
+  'openhamclock_bandColors',
   'openhamclock_satelliteFilters',
   'openhamclock_solarImageType',
   'openhamclock_solarPanelMode',

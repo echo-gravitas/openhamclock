@@ -221,5 +221,8 @@
   "station.settings.satellites.showAll": "Alle satellieten worden getoond (geen filter)",
   "station.settings.satellites.selectedCount": "{{count}} satelliet(en) geselecteerd",
   "station.settings.satellites.visible": "✓ Zichtbaar",
+  "station.settings.satellites.belowHorizon": "✗ Onder de horizon",
+  "app.legend.sun": "Sun",
+  "app.legend.moon": "Moon",
   "station.settings.satellites.belowHorizon": "✗ Onder de horizon"
 }

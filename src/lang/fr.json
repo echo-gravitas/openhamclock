@@ -233,5 +233,8 @@
   "station.settings.satellites.showAll": "Tous les satellites affichés (aucun filtre)",
   "station.settings.satellites.selectedCount": "{{count}} satellite(s) sélectionné(s)",
   "station.settings.satellites.visible": "✓ Visible",
+  "station.settings.satellites.belowHorizon": "✗ Sous l'horizon",
+  "app.legend.sun": "Sun",
+  "app.legend.moon": "Moon",
   "station.settings.satellites.belowHorizon": "✗ Sous l'horizon"
 }
