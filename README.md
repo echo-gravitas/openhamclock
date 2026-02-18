@@ -27,6 +27,8 @@ npm start
 
 Open [http://localhost:3000](http://localhost:3000) in your browser. On first run, the server creates a `.env` file from `.env.example` and builds the React frontend automatically. A setup wizard will walk you through entering your callsign and grid locator.
 
+In development mode, the frontend runs on port 3000 and proxies API requests to the backend on port 3001.
+
 You can also configure your station by editing `.env` directly:
 
 ```bash
@@ -40,10 +42,10 @@ Restart with `npm start` after editing `.env` to apply changes.
 For development with hot reload:
 
 ```bash
-# Terminal 1 — Backend
+# Terminal 1 — Backend (http://localhost:3001)
 node server.js
 
-# Terminal 2 — Frontend (hot reload on http://localhost:5173)
+# Terminal 2 — Frontend (hot reload on http://localhost:3000)
 npm run dev
 ```
 
@@ -692,7 +694,7 @@ All configuration is done through the `.env` file. On first run, this file is au
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PORT` | `3000` | HTTP server port. Change if 3000 is already in use. |
+| `PORT` | `3001` | Backend API server port. In development, the Vite frontend runs on 3000 and proxies /api to this port. |
 | `HOST` | `localhost` | Bind address. Set to `0.0.0.0` to make OpenHamClock accessible from other devices on your LAN (tablets, phones, other PCs). |
 | `LOG_LEVEL` | `warn` | Server log verbosity: `debug` (everything), `info` (operational), `warn` (problems), `error` (failures only). Use `warn` for production. |
 
