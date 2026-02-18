@@ -8,12 +8,17 @@ import CallsignLink from './CallsignLink.jsx';
 export const POTAPanel = ({
   data,
   loading,
+  lastUpdated,
   showOnMap,
   onToggleMap,
   showLabelsOnMap = true,
   onToggleLabelsOnMap,
   onSpotClick,
 }) => {
+  // Staleness indicator — warn if data hasn't refreshed in 5+ minutes
+  const staleMinutes = lastUpdated ? Math.floor((Date.now() - lastUpdated) / 60000) : null;
+  const isStale = staleMinutes !== null && staleMinutes >= 5;
+
   return (
     <div className="panel" style={{ padding: '8px', height: '100%', display: 'flex', flexDirection: 'column' }}>
       <div className="panel-header" style={{
@@ -23,7 +28,10 @@ export const POTAPanel = ({
         marginBottom: '6px',
         fontSize: '11px'
       }}>
-        <span>▲ POTA ACTIVATORS {data?.length > 0 ? `(${data.length})` : ''}</span>
+        <span>
+          ▲ POTA ACTIVATORS {data?.length > 0 ? `(${data.length})` : ''}
+          {isStale && <span title={`Last updated ${staleMinutes}m ago`} style={{ color: staleMinutes >= 10 ? '#ff4444' : '#ffaa00', marginLeft: '6px', fontSize: '9px' }}>⚠ {staleMinutes}m ago</span>}
+        </span>
         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
           <button
             onClick={onToggleMap}

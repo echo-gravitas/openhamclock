@@ -577,6 +577,7 @@ export const DockableApp = ({
           <POTAPanel
             data={potaSpots.data}
             loading={potaSpots.loading}
+            lastUpdated={potaSpots.lastUpdated}
             showOnMap={mapLayersEff.showPOTA}
             onToggleMap={togglePOTAEff}
 
@@ -592,6 +593,7 @@ export const DockableApp = ({
           <WWFFPanel
             data={wwffSpots.data}
             loading={wwffSpots.loading}
+            lastUpdated={wwffSpots.lastUpdated}
             showOnMap={mapLayersEff.showWWFF}
             onToggleMap={toggleWWFFEff}
 
@@ -603,7 +605,7 @@ export const DockableApp = ({
         break;
 
       case 'sota':
-        content = <SOTAPanel data={sotaSpots.data} loading={sotaSpots.loading} showOnMap={mapLayersEff.showSOTA} onToggleMap={toggleSOTAEff} />;
+        content = <SOTAPanel data={sotaSpots.data} loading={sotaSpots.loading} lastUpdated={sotaSpots.lastUpdated} showOnMap={mapLayersEff.showSOTA} onToggleMap={toggleSOTAEff} />;
         break;
 
       case 'contests':

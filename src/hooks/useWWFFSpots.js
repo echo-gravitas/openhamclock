@@ -9,6 +9,8 @@ import { apiFetch } from '../utils/apiFetch';
 export const useWWFFSpots = () => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [lastChecked, setLastChecked] = useState(null);
   const fetchRef = useRef(null);
 
   useEffect(() => {
@@ -16,8 +18,10 @@ export const useWWFFSpots = () => {
       try {
         // Use server proxy for caching - reduces external API calls
         const res = await apiFetch('/api/wwff/spots');
-        if (res.ok) {
+        if (res?.ok) {
           const spots = await res.json();
+          console.log(`[WWFF] Fetched ${Array.isArray(spots) ? spots.length : 0} spots`);
+          setLastUpdated(Date.now());
 
           // Filter out QRT spots and nearly-expired spots, then sort by most recent
           const validSpots = spots
@@ -61,10 +65,13 @@ export const useWWFFSpots = () => {
               expire: 0
             };
           }));
+        } else {
+          console.warn(`[WWFF] Fetch failed: ${res?.status || 'no response'} ${res?.statusText || ''}`);
         }
       } catch (err) {
-        console.error('WWFF error:', err);
+        console.error('[WWFF] Fetch error:', err.message || err);
       } finally {
+        setLastChecked(Date.now());
         setLoading(false);
       }
     };
@@ -77,7 +84,7 @@ export const useWWFFSpots = () => {
 
   useVisibilityRefresh(() => fetchRef.current?.(), 10000);
 
-  return { data, loading };
+  return { data, loading, lastUpdated, lastChecked };
 };
 
 export default useWWFFSpots;

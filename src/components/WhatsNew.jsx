@@ -49,6 +49,11 @@ const CHANGELOG = [
         title: 'DX Cluster Mode Filter Fixed',
         desc: 'Filtering by SSB, FT8, or CW no longer hides everything. Mode detection now infers from frequency when the spot comment doesn\'t mention a mode — which is most spots. 14.074? That\'s FT8. 14.250? SSB. It just works now.'
       },
+      {
+        icon: '📡',
+        title: 'RBN Skimmer Locations Fixed',
+        desc: 'Fixed a bug where RBN skimmer callsigns could show at wrong locations on the map. Enrichment is now sequential with cross-validation — if a lookup returns a location >5000 km from the callsign\'s expected country, it falls back to prefix estimation.'
+      },
     ]
   },
   {

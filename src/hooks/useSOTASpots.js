@@ -9,6 +9,8 @@ import { apiFetch } from '../utils/apiFetch';
 export const useSOTASpots = () => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [lastChecked, setLastChecked] = useState(null);
   const fetchRef = useRef(null);
 
   useEffect(() => {
@@ -17,6 +19,8 @@ export const useSOTASpots = () => {
         const res = await apiFetch('/api/sota/spots');
         if (res?.ok) {
           const spots = await res.json();
+          console.log(`[SOTA] Fetched ${Array.isArray(spots) ? spots.length : 0} spots`);
+          setLastUpdated(Date.now());
 
           // Map SOTA API response to our standard spot format
           const mapped = (Array.isArray(spots) ? spots : [])
@@ -65,10 +69,13 @@ export const useSOTASpots = () => {
             });
 
           setData(mapped);
+        } else {
+          console.warn(`[SOTA] Fetch failed: ${res?.status || 'no response'} ${res?.statusText || ''}`);
         }
       } catch (err) {
-        console.error('SOTA error:', err);
+        console.error('[SOTA] Fetch error:', err.message || err);
       } finally {
+        setLastChecked(Date.now());
         setLoading(false);
       }
     };
@@ -81,7 +88,7 @@ export const useSOTASpots = () => {
 
   useVisibilityRefresh(() => fetchRef.current?.(), 10000);
 
-  return { data, loading };
+  return { data, loading, lastUpdated, lastChecked };
 };
 
 export default useSOTASpots;

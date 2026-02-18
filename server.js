@@ -5218,6 +5218,7 @@ setInterval(() => {
 }, 60000); // Run every 60 seconds
 
 // Helper: enrich a spot with skimmer location data
+// Uses sequential processing to avoid any concurrent lookup issues
 async function enrichSpotWithLocation(spot) {
   const skimmerCall = spot.callsign;
   
@@ -5238,9 +5239,51 @@ async function enrichSpotWithLocation(spot) {
     const response = await fetch(`http://localhost:${PORT}/api/callsign/${skimmerCall}`);
     if (response.ok) {
       const locationData = await response.json();
+      
+      // Verify the API returned data for the callsign we asked for
+      // (guards against any response mix-up or redirect)
+      const returnedCall = (locationData.callsign || '').toUpperCase();
+      const requestedBase = extractBaseCallsign(skimmerCall);
+      if (returnedCall && returnedCall !== requestedBase && returnedCall !== skimmerCall.toUpperCase()) {
+        console.warn(`[RBN] Callsign mismatch! Requested: ${skimmerCall}, Got: ${returnedCall} — discarding`);
+        return spot;
+      }
+      
       // Validate coordinates are reasonable
       if (typeof locationData.lat === 'number' && typeof locationData.lon === 'number' &&
           Math.abs(locationData.lat) <= 90 && Math.abs(locationData.lon) <= 180) {
+        
+        // Cross-validate: compare returned location against prefix estimate
+        // If they're wildly different, the lookup data may be wrong
+        const prefixLoc = estimateLocationFromPrefix(requestedBase);
+        if (prefixLoc) {
+          const prefixCoords = maidenheadToLatLon(prefixLoc.grid);
+          if (prefixCoords) {
+            const dist = haversineDistance(locationData.lat, locationData.lon, prefixCoords.lat, prefixCoords.lon);
+            if (dist > 5000) {
+              // Location is > 5000 km from where the callsign prefix says it should be
+              // This is almost certainly wrong data — use prefix estimate instead
+              console.warn(`[RBN] Location sanity check FAILED for ${skimmerCall}: lookup=${locationData.lat.toFixed(1)},${locationData.lon.toFixed(1)} vs prefix=${prefixCoords.lat.toFixed(1)},${prefixCoords.lon.toFixed(1)} (${Math.round(dist)} km apart) — using prefix`);
+              const grid = latLonToGrid(prefixCoords.lat, prefixCoords.lon);
+              const location = {
+                callsign: skimmerCall,
+                grid: grid,
+                lat: prefixCoords.lat,
+                lon: prefixCoords.lon,
+                country: prefixLoc.country || locationData.country
+              };
+              cacheCallsignLocation(skimmerCall, location);
+              return {
+                ...spot,
+                grid: grid,
+                skimmerLat: prefixCoords.lat,
+                skimmerLon: prefixCoords.lon,
+                skimmerCountry: location.country
+              };
+            }
+          }
+        }
+        
         const grid = latLonToGrid(locationData.lat, locationData.lon);
         
         const location = {
@@ -5298,8 +5341,12 @@ app.get('/api/rbn/spots', async (req, res) => {
   const dxSpots = rbnSpotsByDX.get(callsign) || [];
   const recentSpots = dxSpots.filter(spot => spot.timestampMs > cutoff);
   
-  // Enrich with skimmer locations
-  const enrichedSpots = await Promise.all(recentSpots.map(enrichSpotWithLocation));
+  // Enrich with skimmer locations — process sequentially to avoid
+  // concurrent lookup race conditions that can mix up locations
+  const enrichedSpots = [];
+  for (const spot of recentSpots) {
+    enrichedSpots.push(await enrichSpotWithLocation(spot));
+  }
   
   console.log(`[RBN] Returning ${enrichedSpots.length} spots for ${callsign} (last ${minutes} min, ${rbnSpotsByDX.size} DX stations tracked)`);
   

@@ -32,6 +32,8 @@ function gridToLatLon(grid) {
 export const usePOTASpots = () => {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(null);
+  const [lastChecked, setLastChecked] = useState(null);
   const fetchRefPOTA = useRef(null);
 
   useEffect(() => {
@@ -41,6 +43,8 @@ export const usePOTASpots = () => {
         const res = await apiFetch('/api/pota/spots');
         if (res?.ok) {
           const spots = await res.json();
+          console.log(`[POTA] Fetched ${Array.isArray(spots) ? spots.length : 0} spots`);
+          setLastUpdated(Date.now());
 
           // Filter out QRT spots and nearly-expired spots, then sort by most recent
           const validSpots = spots
@@ -107,10 +111,13 @@ export const usePOTASpots = () => {
               expire: s.expire || 0
             };
           }));
+        } else {
+          console.warn(`[POTA] Fetch failed: ${res?.status || 'no response'} ${res?.statusText || ''}`);
         }
       } catch (err) {
-        console.error('POTA error:', err);
+        console.error('[POTA] Fetch error:', err.message || err);
       } finally {
+        setLastChecked(Date.now());
         setLoading(false);
       }
     };
@@ -124,7 +131,7 @@ export const usePOTASpots = () => {
   // Refresh immediately when tab becomes visible (handles browser throttling)
   useVisibilityRefresh(() => fetchRefPOTA.current?.(), 10000);
 
-  return { data, loading };
+  return { data, loading, lastUpdated, lastChecked };
 };
 
 export default usePOTASpots;
