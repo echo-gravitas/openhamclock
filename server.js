@@ -1779,10 +1779,6 @@ app.get('/api/noaa/flux', async (req, res) => {
 // NOAA Space Weather - K-Index
 app.get('/api/noaa/kindex', async (req, res) => {
   try {
-  if (
-      noaaCache.kindex.data &&
-      Date.now() - noaaCache.kindex.timestamp < NOAA_CACHE_TTL
-    ) {
     if (noaaCache.kindex.data && Date.now() - noaaCache.kindex.timestamp < NOAA_CACHE_TTL) {
       return res.json(noaaCache.kindex.data);
     }
