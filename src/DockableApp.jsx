@@ -856,47 +856,6 @@ export const DockableApp = ({
               fontWeight: '700',
               fontFamily: 'JetBrains Mono, monospace',
               padding: '0 3px',
-              opacity: currentZoom <= 0.7 ? 0.3 : 1,
-            }}
-          >
-            A−
-          </button>,
-        );
-        if (currentZoom !== 1.0) {
-          renderValues.stickyButtons.push(
-            <button
-              key="zoom-reset"
-              title="Reset font size"
-              className="flexlayout__tab_toolbar_button"
-              onClick={(e) => {
-                e.stopPropagation();
-                resetZoom(selectedComponent);
-              }}
-              style={{
-                fontSize: '9px',
-                fontFamily: 'JetBrains Mono, monospace',
-                padding: '0 2px',
-                color: 'var(--accent-amber)',
-              }}
-            >
-              {zoomPct}%
-            </button>,
-          );
-        }
-        renderValues.stickyButtons.push(
-          <button
-            key="zoom-in"
-            title="Increase font size"
-            className="flexlayout__tab_toolbar_button"
-            onClick={(e) => {
-              e.stopPropagation();
-              adjustZoom(selectedComponent, 1);
-            }}
-            style={{
-              fontSize: '11px',
-              fontWeight: '700',
-              fontFamily: 'JetBrains Mono, monospace',
-              padding: '0 3px',
               opacity: currentZoom >= 2.0 ? 0.3 : 1,
             }}
           >
