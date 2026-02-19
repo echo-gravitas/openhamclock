@@ -23,7 +23,7 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 
-const VERSION = '1.0.0';
+const VERSION = '1.0.1';
 const HTTP_PORT_DEFAULT = 5555;
 
 // Config lives NEXT TO the executable (or cwd for dev), NOT inside the pkg snapshot
@@ -89,7 +89,9 @@ const YaesuProtocol = {
       this.buffer = this.buffer.substring(idx + 1);
     }
     for (const cmd of commands) {
-      if (cmd.startsWith('FA') && cmd.length >= 11) {
+      if (cmd === '?;') {
+        console.log('[Yaesu] Radio returned error (?;) — command not recognised or radio busy');
+      } else if (cmd.startsWith('FA') && cmd.length >= 11) {
         const freq = parseInt(cmd.substring(2, cmd.length - 1));
         if (freq > 0) updateState('freq', freq);
       } else if (cmd.startsWith('MD0') && cmd.length >= 4) {
@@ -149,7 +151,9 @@ const KenwoodProtocol = {
       this.buffer = this.buffer.substring(idx + 1);
     }
     for (const cmd of commands) {
-      if (cmd.startsWith('FA') && cmd.length >= 13) {
+      if (cmd === '?;') {
+        console.log('[Kenwood] Radio returned error (?;) — command not recognised or radio busy');
+      } else if (cmd.startsWith('FA') && cmd.length >= 13) {
         const freq = parseInt(cmd.substring(2, cmd.length - 1));
         if (freq > 0) updateState('freq', freq);
       } else if (cmd.startsWith('MD') && cmd.length >= 3) {
@@ -323,6 +327,7 @@ async function initSerial(cfg) {
       stopBits: cfg.serial.stopBits || 2,
       parity: cfg.serial.parity || 'none',
       autoOpen: false,
+      hupcl: false,  // Don't drop DTR/RTS when port closes — prevents re-init issues on Windows
     });
   } catch (e) {
     console.error(`[Serial] Failed to create port: ${e.message}`);
@@ -334,12 +339,31 @@ async function initSerial(cfg) {
     state.connected = true;
     broadcast({ type: 'update', prop: 'connected', value: true });
 
-    pollTimer = setInterval(() => {
+    // Assert DTR HIGH so the radio's USB interface will send responses back.
+    // Windows USB-serial drivers (CP210x, FTDI) default DTR to LOW on open;
+    // terminal programs like PuTTY assert it HIGH, which is why they work out
+    // of the box.  Without DTR the radio accepts commands but returns nothing —
+    // connected shows true but freq/mode/ptt all stay at 0 (FT-DX10, FT-991A,
+    // and other Yaesu/Icom radios with CP210x USB chips exhibit this symptom).
+    serialPort.set({ dtr: true, rts: false }, (err) => {
+      if (err) console.log(`[Serial] Warning: could not set DTR: ${err.message}`);
+    });
+
+    // Wait 300 ms before starting polls — on Windows the CP210x/FTDI USB driver
+    // needs a moment after open before the receive path is fully active.  Without
+    // this delay the first several responses from the radio are silently dropped,
+    // leaving the listener in a permanently-stale state.
+    setTimeout(() => {
       if (!serialPort?.isOpen) return;
-      for (const cmd of protocol.buildPollCommands()) {
-        try { serialPort.write(cmd); } catch {}
-      }
-    }, cfg.radio.pollInterval || 500);
+      pollTimer = setInterval(() => {
+        if (!serialPort?.isOpen) return;
+        for (const cmd of protocol.buildPollCommands()) {
+          try { serialPort.write(cmd); } catch (e) {
+            console.log(`[Serial] Write error: ${e.message}`);
+          }
+        }
+      }, cfg.radio.pollInterval || 500);
+    }, 300);
   });
 
   serialPort.on('data', (data) => {
