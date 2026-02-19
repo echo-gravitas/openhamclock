@@ -355,6 +355,44 @@ export const replicatePoint = (lat, lon) => {
   const nLon = normalizeLon(lon);
   return WORLD_COPY_OFFSETS.map(offset => [lat, nLon + offset]);
 };
+export const calculateSolarElevation = (lat, lon, date = new Date()) => {
+  if (lat == null || lon == null) return null;
+
+  const rad = Math.PI / 180;
+  const φ = lat * rad;
+
+  // Day of year (UTC)
+  const start = Date.UTC(date.getUTCFullYear(), 0, 0);
+  const diff = date.getTime() - start;
+  const day = Math.floor(diff / 86400000);
+
+  // Fractional UTC hour
+  const utcHours = date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
+
+  // Approx solar declination (radians)
+  const δ = 23.44 * rad * Math.sin(((2 * Math.PI) / 365) * (day - 81));
+
+  // Local solar time approximation
+  const lst = utcHours + lon / 15;
+
+  // Hour angle (radians)
+  const H = (15 * (lst - 12)) * rad;
+
+  // Solar elevation (radians)
+  const sinAlt = Math.sin(φ) * Math.sin(δ) + Math.cos(φ) * Math.cos(δ) * Math.cos(H);
+  const alt = Math.asin(Math.max(-1, Math.min(1, sinAlt)));
+
+  return alt / rad; // degrees
+};
+
+export const classifyTwilight = (solarElevationDeg) => {
+  if (solarElevationDeg == null) return 'unknown';
+  if (solarElevationDeg > 0) return 'day';
+  if (solarElevationDeg > -6) return 'civil';
+  if (solarElevationDeg > -12) return 'nautical';
+  if (solarElevationDeg > -18) return 'astronomical';
+  return 'night';
+};
 
 export default {
   calculateGridSquare,
@@ -369,5 +407,7 @@ export default {
   replicatePath,
   replicatePoint,
   normalizeLon,
+  calculateSolarElevation,
+  classifyTwilight,
   WORLD_COPY_OFFSETS
 };

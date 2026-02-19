@@ -10,33 +10,6 @@ import { useState, useEffect } from 'react';
 // Each entry: { version, date, heading, features: [...] }
 const CHANGELOG = [
   {
-    version: '15.5.5',
-    date: '2026-02-18',
-    heading: 'Map reliability, contributor tooling, and cleaner error messages.',
-    features: [
-      {
-        icon: '🗺️',
-        title: 'Leaflet Load Reliability Fix',
-        desc: 'Fixed a race condition where the world map could silently fail to initialize if Leaflet\'s vendor script hadn\'t finished loading by the time the map component mounted — most likely on slower connections or after a failed vendor-download. The map now polls for up to 5 seconds and retries automatically instead of giving up on first mount.'
-      },
-      {
-        icon: '🛠️',
-        title: 'Actionable Leaflet Error',
-        desc: 'If Leaflet genuinely fails to load after 5 seconds (missing vendor file, 404, network error), the console now shows a clear message with the exact fix: run bash scripts/vendor-download.sh. No more cryptic "Leaflet not loaded" with no context.'
-      },
-      {
-        icon: '🤝',
-        title: 'Contributor Self-Assign',
-        desc: 'Any GitHub user can now self-assign issues without needing write access. Comment /assign on any open issue and the bot will claim it for you instantly and react with 👍. Makes it easy to signal you\'re working on something without waiting for a maintainer.'
-      },
-      {
-        icon: '📋',
-        title: 'Updated Contributing Guide',
-        desc: 'CONTRIBUTING.md now includes a dedicated "Claiming a Bug or Issue" section explaining the /assign workflow, sitting right where new contributors naturally look — between feature requests and code submission instructions.'
-      },
-    ]
-  },
-  {
     version: '15.5.4',
     date: '2026-02-18',
     heading: 'Squashing bugs, plugging leaks, and keeping your spots fresh.',

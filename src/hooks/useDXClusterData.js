@@ -127,7 +127,17 @@ export const useDXClusterData = (filters = {}, config = {}) => {
       time: item.time || '',
       spotter: item.spotter,
       source: 'DXCluster',
-      timestamp: item.timestamp
+      timestamp: item.timestamp,
+
+      // Needed for callsign weather overlay on hover:
+      dxGrid: item.dxGrid,
+      dxLat: item.dxLat,
+      dxLon: item.dxLon,
+
+      // Optional (handy for future overlays):
+      spotterGrid: item.spotterGrid,
+      spotterLat: item.spotterLat,
+      spotterLon: item.spotterLon,
     }));
     
     // Format for map display (matches old useDXPaths format)

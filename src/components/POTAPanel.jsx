@@ -15,6 +15,7 @@ export const POTAPanel = ({
   showLabelsOnMap = true,
   onToggleLabelsOnMap,
   onSpotClick,
+  onHoverSpot,
 }) => {
   // Staleness indicator — warn if data hasn't changed in 5+ minutes
   const staleMinutes = lastUpdated ? Math.floor((Date.now() - lastUpdated) / 60000) : null;
@@ -92,6 +93,8 @@ export const POTAPanel = ({
                   borderBottom: i < data.length - 1 ? '1px solid var(--border-color)' : 'none',
                   cursor: 'pointer'
                 }}
+                onMouseEnter={() => onHoverSpot?.(spot)}
+                onMouseLeave={() => onHoverSpot?.(null)}
                 onClick={() => {
                   onSpotClick?.(spot);
                 }}
