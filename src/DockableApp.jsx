@@ -942,27 +942,6 @@ export const DockableApp = ({
           );
           break;
 
-        case 'rig-control':
-          content = <RigControlPanel />;
-          break;
-
-        case 'on-air':
-          content = <OnAirPanel />;
-          break;
-
-        case 'id-timer':
-          content = <IDTimerPanel callsign={config.callsign} />;
-          break;
-
-        default:
-          content = (
-            <div style={{ padding: '20px', color: '#ff6b6b', textAlign: 'center' }}>
-              <div style={{ fontSize: '14px', marginBottom: '8px' }}>Outdated panel: {component}</div>
-              <div style={{ fontSize: '12px', color: '#888' }}>Click "Reset" button below to update layout</div>
-            </div>
-          );
-      }
-
         case 'contests':
           content = <ContestPanel data={contests.data} loading={contests.loading} />;
           break;
